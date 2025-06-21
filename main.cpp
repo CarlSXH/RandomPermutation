@@ -1570,9 +1570,13 @@ int AVLTest()
 }
 
 #include "SegmentTree.h"
+#include "Testing.h"
 
 int main(int argc, char *argv[]) {
     //int kDebug = __builtin_popcountll(0xFFFFFFFF);
+
+    GeneralTest();
+    return 0;
 
     device = RandDevice::SetSeed(1798297);
 #define Num 2000000
@@ -1773,6 +1777,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_ LPWSTR    lpCmdLine,
     _In_ int       nCmdShow)
 {
+
+
+
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
     
