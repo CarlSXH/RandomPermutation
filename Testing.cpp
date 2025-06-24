@@ -37,9 +37,8 @@ void DatablockTest()
     b.sz = 512;
 
     DynamicBitvector<512> d;
-    sizeof(DynamicBitvector<64>::Node);
-    DynamicBitvector<64>::MAX_WORDS;
-    sizeof(Datablock<2>);
+
+    d.insert(0, true);
 
 
 
@@ -63,59 +62,6 @@ void DatablockTest()
     cout << endl;
 
 
-    b.shift_forward(5);
-
-    for (int i = 0; i <= Datablock<512>::block_index(b.sz-1); i++)
-    {
-        bitset<64> w(b.data[i]);
-        cout << w << endl;
-    }
-    cout << endl;
-
-    b.shift_backward(61);
-
-    for (int i = 0; i <= Datablock<512>::block_index(b.sz - 1); i++)
-    {
-        bitset<64> w(b.data[i]);
-        cout << w << endl;
-    }
-    cout << endl;
-
-    b.shift_forward(100);
-
-    for (int i = 0; i <= Datablock<512>::block_index(b.sz - 1); i++)
-    {
-        bitset<64> w(b.data[i]);
-        cout << w << endl;
-    }
-    cout << endl;
-
-    b.shift_forward(128);
-    for (int i = 0; i <= Datablock<512>::block_index(b.sz - 1); i++)
-    {
-        bitset<64> w(b.data[i]);
-        cout << w << endl;
-    }
-    cout << endl;
-
-
-    b.shift_forward(254);
-    for (int i = 0; i <= Datablock<512>::block_index(b.sz - 1); i++)
-    {
-        bitset<64> w(b.data[i]);
-        cout << w << endl;
-    }
-    cout << endl;
-
-
-
-    b.shift_forward(510);
-    for (int i = 0; i <= Datablock<512>::block_index(b.sz - 1); i++)
-    {
-        bitset<64> w(b.data[i]);
-        cout << w << endl;
-    }
-    cout << endl;
 
 
 

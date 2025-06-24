@@ -6,17 +6,25 @@
 #include <random>
 #include <vector>
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#pragma intrinsic(__popcnt64)
+#endif
 
-typedef uint32_t ui32;
+#define _BOUND_CHECKING
 
 
-// This class represents a collection of B bits.
+using ui32 = uint32_t;
+
+
+
+// This class represents a collection of 64*B bits.
 // All operations will be linear in B implemented
 // using bitwise operations.
 template <unsigned int B>
 struct Datablock {
-    ui32 sz;       // number of bits in this block
-    ui32 ones;     // number of 1-bits in this block
+    ui32 sz;       // number of bits in this structure
+    ui32 ones;     // number of 1-bits in this structure
 
     // This field holds the actual stream of bits. Each
     // element of the array is a block of data. Within a
@@ -27,31 +35,68 @@ struct Datablock {
     uint64_t data[B];
 
     Datablock() : sz(0), ones(0) {
-        std::fill(data, data + MAX_WORDS, 0);
+        std::fill(data, data + B, 0ULL);
     }
 
     // The index of the block in which contains the
     // pos'th bit.
-    static inline ui32 block_index(ui32 pos) {
+    static inline constexpr ui32 block_index(const ui32 &pos) {
         return pos >> 6;
     }
     // The index of the bit within block that contains the
     // pos'th bit of this stream.
-    static inline ui32 bit_index(ui32 pos) {
+    static inline constexpr ui32 bit_index(const ui32 &pos) {
         return pos & 63;
     }
 
-    // Get the pos'th bit in this stream.
-    inline bool get_bit(ui32 pos) {
-        ui32 w = block_index(pos);
-        ui32 b = bit_index(pos);
+    // Count the number of 1's in a 64 bit number x.
+    // This is the cross-platform implementation.
+    static inline ui32 popcount64(const uint64_t &x) noexcept {
+#if defined(_MSC_VER)
+        return static_cast<ui32>(__popcnt64(x));
+#else
+        return static_cast<ui32>(__builtin_popcountll(x));
+#endif
+    }
+
+#if defined(_BOUND_CHECKING)
+    // Returns true if a position index pos is within valid range,
+    // which is [0, sz). Otherwise return false.
+    inline bool valid_pos(const ui32 &pos) const { return pos < sz; }
+    // Returns true if a block index pos is within valid range,
+    // which is [0, floor(sz/64)). Otherwise return false.
+    inline bool valid_block_pos(const ui32 &pos) const { return pos < sz / 64; }
+    // Returns true if a size argument s is within valid range,
+    // which is [0, sz]. Otherwise return false.
+    inline bool valid_size(const ui32 &s) const { return s <= sz; }
+    // Returns true if a size argument s is within valid capacity,
+    // which is [0, 64B]. Otherwise return false.
+    inline static bool valid_capacity(const ui32 &s) { return s <= 64 * B; }
+#endif
+
+
+    // Return the pos'th bit in this stream.
+    inline bool get_bit(const ui32 &pos) const {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos))
+            throw std::out_of_range("");
+#endif
+
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
         return (data[w] >> b) & 1U;
     }
-    // Set the pos'th bit in this stream.
-    inline void set_bit(ui32 pos, bool bit) {
-        ui32 w = block_index(pos);
-        ui32 b = bit_index(pos);
-        if ((bool)((data[w] >> b) & 1U) == bit)
+    // Set the pos'th bit in this stream and update the
+    // number of ones
+    inline void set_bit(const ui32 &pos, bool &bit) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos))
+            throw std::out_of_range("");
+#endif
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+        const bool old = (data[w] >> b) & 1U;
+        if (old == bit)
             return;
 
         if (bit) {
@@ -62,94 +107,353 @@ struct Datablock {
             data[w] &= ~(1ULL << b);
         }
     }
+    // Set the pos'th bit in this stream without updating 
+    // the number of ones
+    inline void set_bit_no_count(const ui32 &pos, bool &bit) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos))
+            throw std::out_of_range("");
+#endif
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+        const bool old = (data[w] >> b) & 1U;
+        if (old == bit)
+            return;
 
-    // Compute the number of 1's in w
-    static inline ui32 ones_in_word(uint64_t w) {
-        // bithack[n] is the number of 1's in
-        // a 4 bit number n
-        static const unsigned short bithack[16] = {
-            0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4
-        };
-        ui32 count = 0;
-        while (w != 0) {
-            count += bithack[w & 0xF];
-            w = w >> 4;
+        if (bit)
+            data[w] |= (1ULL << b);
+        else
+            data[w] &= ~(1ULL << b);
+    }
+    
+    // Return the next 64 bits at the pos'th bit in this stream.
+    inline uint64_t get_bits64(const ui32 &pos) const {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || !valid_size(pos + 64))
+            throw std::out_of_range("");
+#endif
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+
+        if (b == 0)
+            return data[w];
+        return (data[w] >> b) | (data[w+1] << (64-b));
+    }
+    // Set the next 64 bits at the pos'th bit in this stream
+    // and update the number of ones
+    inline void set_bits64(const ui32 &pos, const uint64_t &bits) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || !valid_size(pos + 64))
+            throw std::out_of_range("");
+#endif
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+        ones += popcount64(bits);
+
+        if (b == 0) {
+            ones -= popcount64(data[w]);
+            data[w] = bits;
+            return;
         }
-        return count;
+        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
+        const uint64_t bfm = ~((1ULL << (64-b)) - 1); // mask for the fixed bits of data[w+1]
+
+        uint64_t old = 0;
+        old = data[w] & (~ffm);
+        old = old | (data[w+1] & (~bfm));
+        ones -= popcount64(old);
+
+        data[w] = (data[w] & ffm) | (bits << b);
+        data[w+1] = (data[w+1] & bfm) | (bits >> (64-b));
+
     }
-    // Compute the number of 1's in w in the range [pos, pos+s)
-    static inline ui32 ones_chunk(uint64_t w, ui32 pos, ui32 s) {
-        w = w >> pos;
-        // avoid undefined 1ULL << 64 problem
-        if (s >= 64) return ones_in_word(w);
-        w = w & ((1ULL << s) - 1);
-        return ones_in_word(w);
-    }
-    // Compute the number of 1's in the s bits in the back,
-    // or the s most significant bits.
-    static inline ui32 ones_trailing(uint64_t w, ui32 s) {
-        return ones_chunk(w, 64ULL - s, s);
-    }
-    // Compute the number of 1's in the s bits in the front,
-    // or the s least significant bits.
-    static inline ui32 ones_leading(uint64_t w, ui32 s) {
-        return ones_chunk(w, 0, s);
+    // Set the next 64 bits at the pos'th bit in this stream
+    // without updating the number of ones
+    inline void set_bits64_no_count(const ui32 &pos, const uint64_t &bits) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || !valid_size(pos + 64))
+            throw std::out_of_range("");
+#endif
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+
+        if (b == 0) {
+            data[w] = bits;
+            return;
+        }
+        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
+        const uint64_t bfm = ~((1ULL << (64-b)) - 1); // mask for the fixed bits of data[w+1]
+        data[w] = (data[w] & ffm) | (bits << b);
+        data[w+1] = (data[w+1] & bfm) | (bits >> (64-b));
     }
 
-    ui32 ones_count(ui32 start_pos, ui32 s) {
-        ui32 count = 0;
-        ui32 start_w = block_index(start_pos);
-        ui32 start_b = bit_index(start_pos);
-        ui32 end_w = block_index(start_pos + s);
-        ui32 end_b = bit_index(start_pos + s);
+    // Return the next s bits at the pos'th bit in this stream.
+    inline uint64_t get_bits(const ui32 &pos, const ui32 &s) const {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || !valid_size(pos + s))
+            throw std::out_of_range("");
+#endif
+        if (s == 64)
+            return get_bits64(pos);
 
-        if (start_w == end_w)
-            return ones_chunk(data[start_w], start_b, end_b - start_b);
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
 
-        count += ones_trailing(data[start_w], 64-start_b);
-        for (ui32 i = start_w; i < end_w; i++)
-            count += ones_in_word(data[i]);
+        // if the range is within a block
+        if (b + s <= 64) {
+            uint64_t mask = (1ULL<<s) - 1;
+            return (data[w] >> b) & mask;
+        }
+
+        // if the range spans two blocks
+        const uint64_t front = data[w] >> b;
+        const uint64_t size_back = s - (64 - b);
+        const uint64_t back = data[w+1] & ((1ULL << size_back) - 1);
+        return front | (back << (64-b));
+    }
+    // Set the next s bits at the pos'th bit in this stream
+    // and update the number of ones
+    inline void set_bits(const ui32 &pos, const ui32 &s, const uint64_t &bits) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || !valid_size(pos + s))
+            throw std::out_of_range("");
+#endif
+        if (s == 64) {
+            set_bits64(pos, bits);
+            return;
+        }
+
+        bits = bits & ((1ULL<<s)-1);
+        ones += popcount64(bits);
+
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+
+        if (b + s <= 64) {
+            const uint64_t fm = ~(((1ULL<<s)-1) << b); // mask for the fixed bits
+            uint64_t old = data[w] & (~fm);
+            data[w] = (data[w] & fm) | (bits << b);
+            ones -= popcount64(old);
+            return;
+        }
+
+        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
+        const uint64_t size_back = s - (64 - b);
+        const uint64_t bfm = ~((1ULL << size_back) - 1); // mask for the fixed bits of data[w+1]
+
+        uint64_t old = 0;
+        old = data[w] & (~ffm);
+        old = old | (data[w+1] & (~bfm));
+        ones -= popcount64(old);
+
+        data[w] = (data[w] & ffm) | (bits << b);
+        data[w+1] = (data[w+1] & bfm) | (bits >> (64-b));
+    }
+    // Set the next s bits at the pos'th bit in this stream
+    // without updating the number of ones
+    inline void set_bits_no_count(const ui32 &pos, const ui32 &s, const uint64_t &bits) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || !valid_size(pos + s))
+            throw std::out_of_range("");
+#endif
+        if (s == 64) {
+            set_bits64_no_count(pos, bits);
+            return;
+        }
+
+        const uint64_t masked_bits = bits & ((1ULL<<s)-1);
+
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+
+        if (b + s <= 64) {
+            const uint64_t fm = ~(((1ULL<<s)-1) << b); // mask for the fixed bits
+            data[w] = (data[w] & fm) | (masked_bits << b);
+            return;
+        }
+
+        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
+        const uint64_t size_back = s - (64 - b);
+        const uint64_t bfm = ~((1ULL << size_back) - 1); // mask for the fixed bits of data[w+1]
+        data[w] = (data[w] & ffm) | (masked_bits << b);
+        data[w+1] = (data[w+1] & bfm) | (masked_bits >> (64-b));
+    }
+
+    // Expand the current stream by s bits and pad the end with 0's.
+    inline void expand(const ui32 &s) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_capacity(sz + s))
+            throw std::out_of_range("");
+#endif
+        const ui32 start_w = block_index(sz);
+        const ui32 start_b = block_index(sz);
+        const ui32 end_w = block_index(sz + s);
+        const ui32 end_b = block_index(sz + s);
+
+        sz += s;
+        if (start_w == end_w) {
+            uint64_t fm = (1ULL << start_b) - 1;
+            data[start_w] = data[start_w] & fm;
+            return;
+        }
+
+        for (int i = start_w+1; i < end_w; i++)
+            data[i] = 0ULL;
+        // we don't care about what's afterwards anyways
         if (end_b > 0)
-            count += ones_leading(data[end_b], end_b);
+            data[end_w] = 0;
+    }
+    // Remove the last s bits in the current stream and update
+    // the number of ones.
+    inline void shrink(const ui32 &s) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_size(s))
+            throw std::out_of_range("");
+#endif
+        const ui32 start_w = block_index(sz - s);
+        const ui32 start_b = block_index(sz - s);
+        const ui32 end_w = block_index(sz);
+        const ui32 end_b = block_index(sz);
+
+        if (start_w == end_w) {
+            uint64_t fm = (1ULL << start_b) - 1;
+            ones -= popcount64((data[start_w] >> start_b) & ((1ULL<<(end_b-start_b))-1));
+            sz -= s;
+            return;
+        }
+
+        for (int i = start_w+1; i < end_w; i++)
+            ones -= popcount64(data[i]);
+        if (end_b > 0)
+            ones -= popcount64(data[end_w] & ((1ULL << end_b) - 1));
+
+        sz -= s;
+    }
+    // Remove the last s bits in the current stream without
+    // updating the number of ones.
+    inline void shrink_no_count(const ui32 &s) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_size(s))
+            throw std::out_of_range("");
+#endif
+        sz -= s;
+    }
+    // Remove all the bits in the current stream.
+    inline void clear() {
+        sz = 0;
+        ones = 0;
+    }
+
+    // Return the w'th block.
+    inline uint64_t get_block(const ui32 &w) const {
+#if defined(_BOUND_CHECKING)
+        if (!valid_block_pos(w))
+            throw std::out_of_range("");
+#endif
+        
+        return data[w];
+    }
+    // Set the w'th block to be the word bits and update
+    // the number of ones.
+    inline void set_block(const ui32 &w, const uint64_t &bits) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_block_pos(w))
+            throw std::out_of_range("");
+#endif
+        ones -= popcount64(data[w]);
+        ones += popcount64(bits);
+        data[w] = bits;
+    }
+    // Set the w'th block to be the word bits without updating
+    // the number of ones.
+    inline void set_block_no_count(const ui32 &w, const uint64_t &bits) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_block_pos(w))
+            throw std::out_of_range("");
+#endif
+        data[w] = bits;
+    }
+
+    // Return the number of 1's in position [0, s)
+    inline ui32 ones_count(const ui32 &s) const {
+#if defined(_BOUND_CHECKING)
+        if (!valid_size(s))
+            throw std::out_of_range("");
+#endif
+        const ui32 w = block_index(s);
+        const ui32 b = bit_index(s);
+        ui32 count = 0;
+
+        for (ui32 i = 0; i < w; i++)
+            count += popcount64(data[i]);
+        if (b > 0)
+            count += popcount64(data[w] & ((1ULL<<b)-1));
 
         return count;
+    }
+    // Recalculate the number of ones in this stream.
+    inline void pull_ones() {
+        ones = ones_count(sz);
     }
 
     // Insert the bit in the pos'th position in the stream
-    void insert_at(ui32 pos, bool bit) {
+    inline void insert_at(const ui32 &pos, const bool &bit) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || !valid_capacity(sz + 1))
+            throw std::out_of_range("");
+#endif
         // shift all the block after the block that contains the pos'th bit
-        ui32 w = block_index(pos);
-        for (ui32 i = 0; block_index(sz) - i > w; i++) {
-            ui32 curIndex = block_index(sz) - i;
-            data[curIndex] = (data[curIndex] << 1) | (data[curIndex - 1] >> 63);
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+
+        const ui32 end_w = block_index(sz);
+        const ui32 end_b = bit_index(sz);
+
+        if (end_w > w) {
+            if (end_b > 0)
+                data[end_w] = data[end_w] << 1;
+            
+            for (ui32 i = end_w-1; i > w; i--) {
+                data[i+1] = data[i+1] | (data[i] >> 63);
+                data[i] = data[i] << 1;
+            }
+            data[w+1] = data[w+1] | (data[w] >> 63);
         }
+
         // inserting the bit in the block containing the pos'th bit
-        ui32 b = bit_index(pos);
-        uint64_t fm = (1ULL<<b) - 1; // mask for the fixed bits
-        uint64_t sm = ~fm;           // mask for the shift bits
-        auto word = data[w];
-        data[w] = ((word & sm) << 1) | (word & fm);
+        const uint64_t fm = (1ULL<<b) - 1; // mask for the fixed bits
+        const uint64_t sm = ~fm;           // mask for the shift bits
+        
+        // shift the portion after the bit and fix the portion
+        // before the bit
+        data[w] = ((data[w] & sm) << 1) | (data[w] & fm);
+
         if (bit) {
             data[w] = data[w] | (1ULL << b);
             ones++;
         }
         sz++;
     }
-
     // Remove the pos'th bit in the stream
-    void remove_at(ui32 pos) {
+    inline void remove_at(const ui32 &pos) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(pos) || sz > 0)
+            throw std::out_of_range("");
+#endif
         // Update count before it gets destroyed
         if (get_bit(pos))
             ones--;
 
         // First remove the bit from the block containing it
-        ui32 w = block_index(pos);
-        ui32 b = bit_index(pos);
-        uint64_t fm = (1ULL << b) - 1; // mask for the fixed bits
+        const ui32 w = block_index(pos);
+        const ui32 b = bit_index(pos);
+        const uint64_t fm = (1ULL << b) - 1;    // mask for the fixed bits
         uint64_t sm = ~fm;             // mask for the shift bits
         sm = sm & (sm - 1);            // throw away the bit we remove
-        auto word = data[w];
-        data[w] = ((word & sm) >> 1) | (word & fm);
+
+        // shift the portion after the bit and fix the portion
+        // before the bit
+        data[w] = ((data[w] & sm) >> 1) | (data[w] & fm);
 
         // Repeatedly append the last bit of this block as the
         // first bit in the previous block, then shift this
@@ -162,29 +466,194 @@ struct Datablock {
         sz--;
     }
 
-    ui32 copy_to(Datablock *dest, ui32 src_pos, ui32 dest_pos, ui32 n) {
-        for (int i = 0; i < n; i++)
-            dest->set_bit(dest_pos + i, get_bit(src_pos + i));
+    // Copy bits in this stream from the range [src_pos, src_pos+n)
+    // to the range [dest_pos, dest_pos+n) in dest, and update the
+    // number of ones in dest.
+    inline void copy_to(Datablock *&dest, const ui32 &src_pos, const ui32 &dest_pos, const ui32 &n) const {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(src_pos) || !dest->valid_pos(dest_pos) ||
+            !valid_size(src_pos+n) || !dest->valid_size(dest_pos+n))
+            throw std::out_of_range("");
+#endif
+        ui32 i;
+        for (i = 0; i + 64 < n; i += 64) {
+            dest->set_bits64(dest_pos + i, get_bits64(src_pos + i));
+        }
+        dest->set_bits(dest_pos + i, get_bits(src_pos + i, n-i), n-i);
     }
-    void remove_front(ui32 n);
-    void remove_back(ui32 n);
+    // Copy bits in this stream from the range [src_pos, src_pos+n)
+    // to the range [dest_pos, dest_pos+n) in dest without updating
+    // the number of ones in dest.
+    inline void copy_to_no_count(Datablock *&dest, const ui32 &src_pos, const ui32 &dest_pos, const ui32 &n) const {
+#if defined(_BOUND_CHECKING)
+        if (!valid_pos(src_pos) || !dest->valid_pos(dest_pos) ||
+            !valid_size(src_pos + n) || !dest->valid_size(dest_pos + n))
+            throw std::out_of_range("");
+#endif
+        const ui32 start_w = block_index(src_pos);
+        const ui32 start_b = block_index(src_pos);
+        const ui32 end_w = block_index(src_pos + n);
+        const ui32 end_b = block_index(src_pos + n);
 
-    static void split_block(const Datablock *src, Datablock *b1, Datablock *b2, ui32 at);
-    static void append_block(Datablock *src, Datablock *append);
-    static void balance_block(Datablock *b1, Datablock *b2);
-    static void insert_block(Datablock *b, ui32 at, bool bit);
+        if (start_w == end_w) {
+            dest->set_bits_no_count(dest_pos, n, (data[start_w]>>start_b) & ((1ULL<<n)-1));
+            return;
+        }
 
-    static bool insert_balance(Datablock *b1, Datablock *b2, ui32 at, bool bit) {
+        dest->set_bits_no_count(dest_pos, 64 - start_b, data[start_w] >> start_b);
 
+        for (ui32 i = start_w+1; i < end_w; i++) {
+            dest->set_bits64_no_count(dest_pos + 64 - start_b + 64 * (i - start_w), data[i]);
+        }
+        if (end_b > 0)
+            dest->set_bits_no_count(dest_pos+n-end_b, end_b, data[end_w]);
     }
-    static bool delete_balance(Datablock *b1, Datablock *b2, ui32 at) {
 
+    
+    inline void pad_zeros_front(ui32 s) {
+#if defined(_BOUND_CHECKING)
+        if (!valid_capacity(sz + s))
+            throw std::out_of_range("");
+#endif
+        // block index of the last bit
+        const ui32 w = block_index(sz-1);
+        const ui32 w_shift = s / 64;
+        const ui32 b_shift = s - w_shift * 64;
+
+        if (b_shift > 0) {
+
+            ui32 end_b = w + w_shift + 1;
+            if (end_b >= B)
+                end_b = B - 1;
+
+            for (ui32 i = end_b; i > w_shift; i--)
+                data[i] = (data[i - w_shift] << b_shift) | (data[i - w_shift - 1] >> (64 - b_shift));
+
+            for (ui32 i = 0; i < w_shift; i++)
+                data[i] = 0;
+            data[w_shift] = data[w_shift] & ((1 << b_shift) - 1);
+        } else {
+            ui32 end_b = w + w_shift;
+            if (end_b >= B)
+                end_b = B - 1;
+
+            for (ui32 i = end_b; i > w_shift; i--)
+                data[i] = data[i - w_shift];
+            for (ui32 i = 0; i <= w_shift; i++)
+                data[i] = 0;
+        }
+
+        sz += s;
     }
-    static bool delete_merge_left(Datablock *b1, Datablock *b2, ui32 at) {
+    inline void shift_backward_no_count(ui32 s) {
+        if (s >= sz) {
+            clear();
+            return;
+        }
 
+        const ui32 w = block_index(sz - s - 1);
+        const ui32 w_shift = s / 64;
+        const ui32 b_shift = s - w_shift * 64;
+
+        if (b_shift > 0) {
+            for (ui32 i = 0; i < w; i++)
+                data[i] = (data[i + w_shift] >> b_shift) | (data[i + w_shift + 1] << (64 - b_shift));
+
+            data[w] = data[w + w_shift] >> b_shift;
+
+        } else {
+            for (ui32 i = 0; i <= w; i++)
+                data[i] = data[i + w_shift];
+        }
     }
-    static bool delete_merge_right(Datablock *b1, Datablock *b2, ui32 at) {
 
+    static inline void split_insert_balance(Datablock *b1, Datablock *b2, ui32 at, bool bit) {
+        const ui32 sz = b1->sz + b2->sz + 1;
+        if (sz > 2 * B * 64)
+            return;
+        const ui32 sz2 = sz / 2; // size of the first block
+        const ui32 sz1 = sz - sz2; // size of the second block
+
+        b2->clear();
+        b2->expand(sz2);
+
+        if (at < sz1) {
+            b1->copy_to_no_count(b2, sz1-1, 0, sz2);
+            b2->pull_ones();
+            b1->shrink_no_count(sz2);
+            b1->ones -= b2->ones;
+            b1->insert_at(at, bit);
+        } else {
+            b1->copy_to_no_count(b2, sz1, 0, at - sz1);
+            b1->copy_to_no_count(b2, at+1, at - sz1 + 1, sz - 1 - at);
+            b2->pull_ones();
+            b1->shrink_no_count(sz2-1);
+            b1->ones -= b2->ones;
+            b2->set_bit(at - sz1, bit);
+        }
+    }
+    static inline void delete_balance(Datablock *b1, Datablock *b2, ui32 at) {
+        if (b1->sz + b2->sz <= 0)
+            return;
+        const ui32 sz = b1->sz + b2->sz - 1;
+        const ui32 sz1 = sz / 2;   // size of the first block
+        const ui32 sz2 = sz - sz1; // size of the second block
+
+        if (at < b1->sz)
+            b1->remove_at(at);
+        else
+            b2->remove_at(at - b1->sz);
+
+        if (b1->sz > sz1) {
+            b2->pad_zeros_front(sz2 - b2->sz);
+            b1->copy_to_no_count(b2, sz1, 0, b1->sz - sz1);
+            b1->shrink_no_count(b1->sz - sz1);
+            b1->pull_ones();
+            b2->pull_ones();
+        } else {
+            const ui32 orig_size = b1->sz;
+            const ui32 size_diff = sz1 - b1->sz;
+            b1->expand(size_diff);
+            b2->copy_to_no_count(b1, 0, orig_size, size_diff);
+            b2->shift_backward_no_count(size_diff);
+            b1->pull_ones();
+            b2->pull_ones();
+        }
+    }
+    static inline void delete_merge_left(Datablock *b1, Datablock *b2, ui32 pos) {
+        b1->expand(b2->sz-1);
+        if (pos < b1->sz) {
+            b1->remove_at(pos);
+            b2->copy_to_no_count(b1, 0, b1->sz, b2->sz);
+            b1->ones += b2->ones;
+            b2->clear();
+        } else {
+            ui32 pos_loc = pos - b1->sz;
+            b2->copy_to_no_count(b1, 0, b1->sz, pos_loc);
+            b2->copy_to_no_count(b1, pos_loc+1, b1->sz+pos_loc, b2->sz-pos_loc-1);
+            b1->ones += b2->ones;
+            if (b2->get_bit(pos - b1->sz))
+                b1->ones--;
+            b2->clear();
+        }
+    }
+    static inline void delete_merge_right(Datablock *b1, Datablock *b2, ui32 at) {
+        if (at < b1->sz) {
+            b2->pad_zeros_front(b1->sz - 1);
+            b1->copy_to_no_count(b2, 0, 0, at);
+            b1->copy_to_no_count(b2, at+1, at, b1->sz-1-at);
+            if (b1->get_bit(at))
+                b2->ones += b1->ones - 1;
+            else
+                b2->ones += b1->ones;
+            b1->clear();
+        } else {
+            b2->remove_at(at - b1->sz);
+            b2->pad_zeros_front(b1->sz);
+            b1->copy_to(b2, 0, 0, b1->sz);
+            b2->ones += b1->ones;
+            b1->clear();
+        }
     }
 };
 
@@ -208,11 +677,11 @@ public:
         ui32 parent;
         ui32 left;
         ui32 right;
-        ui32 prev;         // doubly-linked list of data blocks
+        ui32 prev;     // doubly-linked list of data blocks
         ui32 next;
-        ui32 sub_sz;       // total bits in subtree, including this block
-        ui32 sub_ones;     // total 1-bits in subtree, including this block
-        ui32 prio;       // random heap priority for treap
+        ui32 sub_sz;   // total bits in subtree, including this block
+        ui32 sub_ones; // total 1-bits in subtree, including this block
+        ui32 prio;     // random heap priority for treap
         Datablock<MAX_WORDS> bits;
         Node() : parent(idx_null), left(idx_null), right(idx_null), prev(idx_null), next(idx_null), sub_sz(0), sub_ones(0), bits() {};
     };
@@ -299,16 +768,6 @@ public:
         pull(idx);
         pull(R);
         return R;
-    }
-
-    ui32 detach(ui32 idx) {
-        if (idx == idx_null)
-            return idx_null;
-        
-        const Node node_cur = nodes[idx];
-        if (node_cur.left == idx_null) {
-            
-        }
     }
 
     ui32 bubble(ui32 idx) {
@@ -403,7 +862,7 @@ public:
             break;
         }
 
-        *pos_loc = pos - n.sz;
+        *pos_loc = pos - nodes[idx].bits.sz;
         return idx;
     }
 
@@ -431,7 +890,7 @@ public:
             break;
         }
 
-        *pos_loc = pos - n.sz;
+        *pos_loc = pos - nodes[idx].sz;
         *out_ones = ones + nodes[idx].bits.ones_count(0, pos_loc);
         return idx;
     }
@@ -468,7 +927,7 @@ public:
 
 public:
     DynamicBitvector() : root(idx_null), rng(std::random_device{}()) {};
-    ~DynamicBitvector();
+    ~DynamicBitvector() {};
 
     // total number of bits
     ui32 size() const {
@@ -532,7 +991,7 @@ public:
         if (node_cur.bits.sz + 1 <= MAX_BITS) {
             // If there isn't overflow
             node_cur.bits.insert_at(pos_loc, bit);
-            pull_propagate(idx_cur);
+            pull_propagate(idx);
             return;
         }
 
@@ -544,18 +1003,18 @@ public:
         ui32 idx_right = alloc_node();
         auto &node_right = nodes[idx_right];
 
-        Datablock<MAX_WORDS>::insert_balance(&node_cur.bits, &node_right.bits, pos_loc, bit);
+        Datablock<MAX_WORDS>::split_insert_balance(&node_cur.bits, &node_right.bits, pos_loc, bit);
 
         // fix linked list
-        ll_insert_after(idx_cur, idx_right);
+        ll_insert_after(idx, idx_right);
 
         node_cur.right = insert_min(node_cur.right, idx_right);
 
         // technically not needed, but logic is scrambled, hard to remove it
         // based on what each function does
-        pull(idx_cur); 
+        pull(idx);
 
-        bubble_pull_propagate(idx_cur);
+        bubble_pull_propagate(idx);
     }
 
     // erase bit at pos in [0..size())
@@ -642,7 +1101,7 @@ public:
             // and remove the current node.
             Datablock<MAX_WORDS>::delete_merge_right(&node_cur.bits, &node_next.bits, pos_loc);
             ll_detach(idx);
-            ui32 idx = rotate_right(idx);
+            idx = rotate_right(idx);
             nodes[idx].right = idx_null;
             pull_propagate(idx);
             return;
@@ -657,7 +1116,7 @@ public:
                 // then we will merge to the current node
                 Datablock<MAX_WORDS>::delete_merge_right(&node_prev.bits, &node_cur.bits, pos_loc);
                 ll_detach(idx_prev);
-                idx_next = rotate_right(idx_prev);
+                idx_prev = rotate_right(idx_prev);
                 nodes[idx_prev].left = idx_null;
                 pull_propagate(idx_prev);
                 return;
@@ -675,9 +1134,6 @@ public:
         }
 
         // the last case has to be true, or there's an error
-
-
-
     }
 };
 

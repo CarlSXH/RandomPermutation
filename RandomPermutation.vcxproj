@@ -128,7 +128,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AVLTree.cpp" />
-    <ClCompile Include="DynamicBitvector.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MyRandom.cpp" />
     <ClCompile Include="RandPerm.cpp" />
