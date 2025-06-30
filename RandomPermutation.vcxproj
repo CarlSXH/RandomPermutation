@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -136,11 +136,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AVLTree.h" />
+    <ClInclude Include="Datablock.h" />
     <ClInclude Include="DynamicBitvector.h" />
     <ClInclude Include="MyRandom.h" />
     <ClInclude Include="RandPerm.h" />
     <ClInclude Include="SegmentTree.h" />
     <ClInclude Include="Testing.h" />
+    <ClInclude Include="WaveletTree.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

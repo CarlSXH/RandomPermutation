@@ -10,6 +10,8 @@
 
 void DatablockTest();
 
+void DynamicBitvectorTest();
+
 void GeneralTest();
 
 

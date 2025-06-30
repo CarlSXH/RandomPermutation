@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Data structures">
+      <UniqueIdentifier>{8fe7f25c-bda2-42eb-b960-40a162899765}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -47,11 +50,17 @@
     <ClInclude Include="SegmentTree.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DynamicBitvector.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Testing.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Datablock.h">
+      <Filter>Data structures</Filter>
+    </ClInclude>
+    <ClInclude Include="DynamicBitvector.h">
+      <Filter>Data structures</Filter>
+    </ClInclude>
+    <ClInclude Include="WaveletTree.h">
+      <Filter>Data structures</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

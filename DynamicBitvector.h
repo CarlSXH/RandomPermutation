@@ -5,713 +5,144 @@
 
 #include <random>
 #include <vector>
-
-#if defined(_MSC_VER)
-#include <intrin.h>
-#pragma intrinsic(__popcnt64)
-#endif
-
-#define _BOUND_CHECKING
+#include <cstdint>
+#include "Datablock.h"
 
 
 using ui32 = uint32_t;
 
-
-
-// This class represents a collection of 64*B bits.
-// All operations will be linear in B implemented
-// using bitwise operations.
-template <unsigned int B>
-struct Datablock {
-    ui32 sz;       // number of bits in this structure
-    ui32 ones;     // number of 1-bits in this structure
-
-    // This field holds the actual stream of bits. Each
-    // element of the array is a block of data. Within a
-    // block, the less significant bits of a word comes
-    // before the more significant bits. The blocks with
-    // smaller indices will come before the blocks with
-    // larger indices.
-    uint64_t data[B];
-
-    Datablock() : sz(0), ones(0) {
-        std::fill(data, data + B, 0ULL);
-    }
-
-    // The index of the block in which contains the
-    // pos'th bit.
-    static inline constexpr ui32 block_index(const ui32 &pos) {
-        return pos >> 6;
-    }
-    // The index of the bit within block that contains the
-    // pos'th bit of this stream.
-    static inline constexpr ui32 bit_index(const ui32 &pos) {
-        return pos & 63;
-    }
-
-    // Count the number of 1's in a 64 bit number x.
-    // This is the cross-platform implementation.
-    static inline ui32 popcount64(const uint64_t &x) noexcept {
-#if defined(_MSC_VER)
-        return static_cast<ui32>(__popcnt64(x));
-#else
-        return static_cast<ui32>(__builtin_popcountll(x));
-#endif
-    }
-
-#if defined(_BOUND_CHECKING)
-    // Returns true if a position index pos is within valid range,
-    // which is [0, sz). Otherwise return false.
-    inline bool valid_pos(const ui32 &pos) const { return pos < sz; }
-    // Returns true if a block index pos is within valid range,
-    // which is [0, floor(sz/64)). Otherwise return false.
-    inline bool valid_block_pos(const ui32 &pos) const { return pos < sz / 64; }
-    // Returns true if a size argument s is within valid range,
-    // which is [0, sz]. Otherwise return false.
-    inline bool valid_size(const ui32 &s) const { return s <= sz; }
-    // Returns true if a size argument s is within valid capacity,
-    // which is [0, 64B]. Otherwise return false.
-    inline static bool valid_capacity(const ui32 &s) { return s <= 64 * B; }
-#endif
-
-
-    // Return the pos'th bit in this stream.
-    inline bool get_bit(const ui32 &pos) const {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos))
-            throw std::out_of_range("");
-#endif
-
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-        return (data[w] >> b) & 1U;
-    }
-    // Set the pos'th bit in this stream and update the
-    // number of ones
-    inline void set_bit(const ui32 &pos, bool &bit) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos))
-            throw std::out_of_range("");
-#endif
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-        const bool old = (data[w] >> b) & 1U;
-        if (old == bit)
-            return;
-
-        if (bit) {
-            ones++;
-            data[w] |= (1ULL << b);
-        } else {
-            ones--;
-            data[w] &= ~(1ULL << b);
-        }
-    }
-    // Set the pos'th bit in this stream without updating 
-    // the number of ones
-    inline void set_bit_no_count(const ui32 &pos, bool &bit) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos))
-            throw std::out_of_range("");
-#endif
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-        const bool old = (data[w] >> b) & 1U;
-        if (old == bit)
-            return;
-
-        if (bit)
-            data[w] |= (1ULL << b);
-        else
-            data[w] &= ~(1ULL << b);
-    }
-    
-    // Return the next 64 bits at the pos'th bit in this stream.
-    inline uint64_t get_bits64(const ui32 &pos) const {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || !valid_size(pos + 64))
-            throw std::out_of_range("");
-#endif
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-
-        if (b == 0)
-            return data[w];
-        return (data[w] >> b) | (data[w+1] << (64-b));
-    }
-    // Set the next 64 bits at the pos'th bit in this stream
-    // and update the number of ones
-    inline void set_bits64(const ui32 &pos, const uint64_t &bits) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || !valid_size(pos + 64))
-            throw std::out_of_range("");
-#endif
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-        ones += popcount64(bits);
-
-        if (b == 0) {
-            ones -= popcount64(data[w]);
-            data[w] = bits;
-            return;
-        }
-        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
-        const uint64_t bfm = ~((1ULL << (64-b)) - 1); // mask for the fixed bits of data[w+1]
-
-        uint64_t old = 0;
-        old = data[w] & (~ffm);
-        old = old | (data[w+1] & (~bfm));
-        ones -= popcount64(old);
-
-        data[w] = (data[w] & ffm) | (bits << b);
-        data[w+1] = (data[w+1] & bfm) | (bits >> (64-b));
-
-    }
-    // Set the next 64 bits at the pos'th bit in this stream
-    // without updating the number of ones
-    inline void set_bits64_no_count(const ui32 &pos, const uint64_t &bits) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || !valid_size(pos + 64))
-            throw std::out_of_range("");
-#endif
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-
-        if (b == 0) {
-            data[w] = bits;
-            return;
-        }
-        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
-        const uint64_t bfm = ~((1ULL << (64-b)) - 1); // mask for the fixed bits of data[w+1]
-        data[w] = (data[w] & ffm) | (bits << b);
-        data[w+1] = (data[w+1] & bfm) | (bits >> (64-b));
-    }
-
-    // Return the next s bits at the pos'th bit in this stream.
-    inline uint64_t get_bits(const ui32 &pos, const ui32 &s) const {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || !valid_size(pos + s))
-            throw std::out_of_range("");
-#endif
-        if (s == 64)
-            return get_bits64(pos);
-
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-
-        // if the range is within a block
-        if (b + s <= 64) {
-            uint64_t mask = (1ULL<<s) - 1;
-            return (data[w] >> b) & mask;
-        }
-
-        // if the range spans two blocks
-        const uint64_t front = data[w] >> b;
-        const uint64_t size_back = s - (64 - b);
-        const uint64_t back = data[w+1] & ((1ULL << size_back) - 1);
-        return front | (back << (64-b));
-    }
-    // Set the next s bits at the pos'th bit in this stream
-    // and update the number of ones
-    inline void set_bits(const ui32 &pos, const ui32 &s, const uint64_t &bits) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || !valid_size(pos + s))
-            throw std::out_of_range("");
-#endif
-        if (s == 64) {
-            set_bits64(pos, bits);
-            return;
-        }
-
-        bits = bits & ((1ULL<<s)-1);
-        ones += popcount64(bits);
-
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-
-        if (b + s <= 64) {
-            const uint64_t fm = ~(((1ULL<<s)-1) << b); // mask for the fixed bits
-            uint64_t old = data[w] & (~fm);
-            data[w] = (data[w] & fm) | (bits << b);
-            ones -= popcount64(old);
-            return;
-        }
-
-        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
-        const uint64_t size_back = s - (64 - b);
-        const uint64_t bfm = ~((1ULL << size_back) - 1); // mask for the fixed bits of data[w+1]
-
-        uint64_t old = 0;
-        old = data[w] & (~ffm);
-        old = old | (data[w+1] & (~bfm));
-        ones -= popcount64(old);
-
-        data[w] = (data[w] & ffm) | (bits << b);
-        data[w+1] = (data[w+1] & bfm) | (bits >> (64-b));
-    }
-    // Set the next s bits at the pos'th bit in this stream
-    // without updating the number of ones
-    inline void set_bits_no_count(const ui32 &pos, const ui32 &s, const uint64_t &bits) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || !valid_size(pos + s))
-            throw std::out_of_range("");
-#endif
-        if (s == 64) {
-            set_bits64_no_count(pos, bits);
-            return;
-        }
-
-        const uint64_t masked_bits = bits & ((1ULL<<s)-1);
-
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-
-        if (b + s <= 64) {
-            const uint64_t fm = ~(((1ULL<<s)-1) << b); // mask for the fixed bits
-            data[w] = (data[w] & fm) | (masked_bits << b);
-            return;
-        }
-
-        const uint64_t ffm = (1ULL << b) - 1; // mask for the fixed bits of data[w]
-        const uint64_t size_back = s - (64 - b);
-        const uint64_t bfm = ~((1ULL << size_back) - 1); // mask for the fixed bits of data[w+1]
-        data[w] = (data[w] & ffm) | (masked_bits << b);
-        data[w+1] = (data[w+1] & bfm) | (masked_bits >> (64-b));
-    }
-
-    // Expand the current stream by s bits and pad the end with 0's.
-    inline void expand(const ui32 &s) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_capacity(sz + s))
-            throw std::out_of_range("");
-#endif
-        const ui32 start_w = block_index(sz);
-        const ui32 start_b = block_index(sz);
-        const ui32 end_w = block_index(sz + s);
-        const ui32 end_b = block_index(sz + s);
-
-        sz += s;
-        if (start_w == end_w) {
-            uint64_t fm = (1ULL << start_b) - 1;
-            data[start_w] = data[start_w] & fm;
-            return;
-        }
-
-        for (int i = start_w+1; i < end_w; i++)
-            data[i] = 0ULL;
-        // we don't care about what's afterwards anyways
-        if (end_b > 0)
-            data[end_w] = 0;
-    }
-    // Remove the last s bits in the current stream and update
-    // the number of ones.
-    inline void shrink(const ui32 &s) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_size(s))
-            throw std::out_of_range("");
-#endif
-        const ui32 start_w = block_index(sz - s);
-        const ui32 start_b = block_index(sz - s);
-        const ui32 end_w = block_index(sz);
-        const ui32 end_b = block_index(sz);
-
-        if (start_w == end_w) {
-            uint64_t fm = (1ULL << start_b) - 1;
-            ones -= popcount64((data[start_w] >> start_b) & ((1ULL<<(end_b-start_b))-1));
-            sz -= s;
-            return;
-        }
-
-        for (int i = start_w+1; i < end_w; i++)
-            ones -= popcount64(data[i]);
-        if (end_b > 0)
-            ones -= popcount64(data[end_w] & ((1ULL << end_b) - 1));
-
-        sz -= s;
-    }
-    // Remove the last s bits in the current stream without
-    // updating the number of ones.
-    inline void shrink_no_count(const ui32 &s) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_size(s))
-            throw std::out_of_range("");
-#endif
-        sz -= s;
-    }
-    // Remove all the bits in the current stream.
-    inline void clear() {
-        sz = 0;
-        ones = 0;
-    }
-
-    // Return the w'th block.
-    inline uint64_t get_block(const ui32 &w) const {
-#if defined(_BOUND_CHECKING)
-        if (!valid_block_pos(w))
-            throw std::out_of_range("");
-#endif
-        
-        return data[w];
-    }
-    // Set the w'th block to be the word bits and update
-    // the number of ones.
-    inline void set_block(const ui32 &w, const uint64_t &bits) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_block_pos(w))
-            throw std::out_of_range("");
-#endif
-        ones -= popcount64(data[w]);
-        ones += popcount64(bits);
-        data[w] = bits;
-    }
-    // Set the w'th block to be the word bits without updating
-    // the number of ones.
-    inline void set_block_no_count(const ui32 &w, const uint64_t &bits) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_block_pos(w))
-            throw std::out_of_range("");
-#endif
-        data[w] = bits;
-    }
-
-    // Return the number of 1's in position [0, s)
-    inline ui32 ones_count(const ui32 &s) const {
-#if defined(_BOUND_CHECKING)
-        if (!valid_size(s))
-            throw std::out_of_range("");
-#endif
-        const ui32 w = block_index(s);
-        const ui32 b = bit_index(s);
-        ui32 count = 0;
-
-        for (ui32 i = 0; i < w; i++)
-            count += popcount64(data[i]);
-        if (b > 0)
-            count += popcount64(data[w] & ((1ULL<<b)-1));
-
-        return count;
-    }
-    // Recalculate the number of ones in this stream.
-    inline void pull_ones() {
-        ones = ones_count(sz);
-    }
-
-    // Insert the bit in the pos'th position in the stream
-    inline void insert_at(const ui32 &pos, const bool &bit) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || !valid_capacity(sz + 1))
-            throw std::out_of_range("");
-#endif
-        // shift all the block after the block that contains the pos'th bit
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-
-        const ui32 end_w = block_index(sz);
-        const ui32 end_b = bit_index(sz);
-
-        if (end_w > w) {
-            if (end_b > 0)
-                data[end_w] = data[end_w] << 1;
-            
-            for (ui32 i = end_w-1; i > w; i--) {
-                data[i+1] = data[i+1] | (data[i] >> 63);
-                data[i] = data[i] << 1;
-            }
-            data[w+1] = data[w+1] | (data[w] >> 63);
-        }
-
-        // inserting the bit in the block containing the pos'th bit
-        const uint64_t fm = (1ULL<<b) - 1; // mask for the fixed bits
-        const uint64_t sm = ~fm;           // mask for the shift bits
-        
-        // shift the portion after the bit and fix the portion
-        // before the bit
-        data[w] = ((data[w] & sm) << 1) | (data[w] & fm);
-
-        if (bit) {
-            data[w] = data[w] | (1ULL << b);
-            ones++;
-        }
-        sz++;
-    }
-    // Remove the pos'th bit in the stream
-    inline void remove_at(const ui32 &pos) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(pos) || sz > 0)
-            throw std::out_of_range("");
-#endif
-        // Update count before it gets destroyed
-        if (get_bit(pos))
-            ones--;
-
-        // First remove the bit from the block containing it
-        const ui32 w = block_index(pos);
-        const ui32 b = bit_index(pos);
-        const uint64_t fm = (1ULL << b) - 1;    // mask for the fixed bits
-        uint64_t sm = ~fm;             // mask for the shift bits
-        sm = sm & (sm - 1);            // throw away the bit we remove
-
-        // shift the portion after the bit and fix the portion
-        // before the bit
-        data[w] = ((data[w] & sm) >> 1) | (data[w] & fm);
-
-        // Repeatedly append the last bit of this block as the
-        // first bit in the previous block, then shift this
-        // entire block. block_index(sz-1) isis the block index
-        // containing the previous last bit in the stream
-        for (ui32 i = w + 1; i <= block_index(sz - 1); i++) {
-            data[i - 1] = data[i - 1] | ((data[i] & 1ULL) << 63);
-            data[i] = data[i] >> 1;
-        }
-        sz--;
-    }
-
-    // Copy bits in this stream from the range [src_pos, src_pos+n)
-    // to the range [dest_pos, dest_pos+n) in dest, and update the
-    // number of ones in dest.
-    inline void copy_to(Datablock *&dest, const ui32 &src_pos, const ui32 &dest_pos, const ui32 &n) const {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(src_pos) || !dest->valid_pos(dest_pos) ||
-            !valid_size(src_pos+n) || !dest->valid_size(dest_pos+n))
-            throw std::out_of_range("");
-#endif
-        ui32 i;
-        for (i = 0; i + 64 < n; i += 64) {
-            dest->set_bits64(dest_pos + i, get_bits64(src_pos + i));
-        }
-        dest->set_bits(dest_pos + i, get_bits(src_pos + i, n-i), n-i);
-    }
-    // Copy bits in this stream from the range [src_pos, src_pos+n)
-    // to the range [dest_pos, dest_pos+n) in dest without updating
-    // the number of ones in dest.
-    inline void copy_to_no_count(Datablock *&dest, const ui32 &src_pos, const ui32 &dest_pos, const ui32 &n) const {
-#if defined(_BOUND_CHECKING)
-        if (!valid_pos(src_pos) || !dest->valid_pos(dest_pos) ||
-            !valid_size(src_pos + n) || !dest->valid_size(dest_pos + n))
-            throw std::out_of_range("");
-#endif
-        const ui32 start_w = block_index(src_pos);
-        const ui32 start_b = block_index(src_pos);
-        const ui32 end_w = block_index(src_pos + n);
-        const ui32 end_b = block_index(src_pos + n);
-
-        if (start_w == end_w) {
-            dest->set_bits_no_count(dest_pos, n, (data[start_w]>>start_b) & ((1ULL<<n)-1));
-            return;
-        }
-
-        dest->set_bits_no_count(dest_pos, 64 - start_b, data[start_w] >> start_b);
-
-        for (ui32 i = start_w+1; i < end_w; i++) {
-            dest->set_bits64_no_count(dest_pos + 64 - start_b + 64 * (i - start_w), data[i]);
-        }
-        if (end_b > 0)
-            dest->set_bits_no_count(dest_pos+n-end_b, end_b, data[end_w]);
-    }
-
-    
-    inline void pad_zeros_front(ui32 s) {
-#if defined(_BOUND_CHECKING)
-        if (!valid_capacity(sz + s))
-            throw std::out_of_range("");
-#endif
-        // block index of the last bit
-        const ui32 w = block_index(sz-1);
-        const ui32 w_shift = s / 64;
-        const ui32 b_shift = s - w_shift * 64;
-
-        if (b_shift > 0) {
-
-            ui32 end_b = w + w_shift + 1;
-            if (end_b >= B)
-                end_b = B - 1;
-
-            for (ui32 i = end_b; i > w_shift; i--)
-                data[i] = (data[i - w_shift] << b_shift) | (data[i - w_shift - 1] >> (64 - b_shift));
-
-            for (ui32 i = 0; i < w_shift; i++)
-                data[i] = 0;
-            data[w_shift] = data[w_shift] & ((1 << b_shift) - 1);
-        } else {
-            ui32 end_b = w + w_shift;
-            if (end_b >= B)
-                end_b = B - 1;
-
-            for (ui32 i = end_b; i > w_shift; i--)
-                data[i] = data[i - w_shift];
-            for (ui32 i = 0; i <= w_shift; i++)
-                data[i] = 0;
-        }
-
-        sz += s;
-    }
-    inline void shift_backward_no_count(ui32 s) {
-        if (s >= sz) {
-            clear();
-            return;
-        }
-
-        const ui32 w = block_index(sz - s - 1);
-        const ui32 w_shift = s / 64;
-        const ui32 b_shift = s - w_shift * 64;
-
-        if (b_shift > 0) {
-            for (ui32 i = 0; i < w; i++)
-                data[i] = (data[i + w_shift] >> b_shift) | (data[i + w_shift + 1] << (64 - b_shift));
-
-            data[w] = data[w + w_shift] >> b_shift;
-
-        } else {
-            for (ui32 i = 0; i <= w; i++)
-                data[i] = data[i + w_shift];
-        }
-    }
-
-    static inline void split_insert_balance(Datablock *b1, Datablock *b2, ui32 at, bool bit) {
-        const ui32 sz = b1->sz + b2->sz + 1;
-        if (sz > 2 * B * 64)
-            return;
-        const ui32 sz2 = sz / 2; // size of the first block
-        const ui32 sz1 = sz - sz2; // size of the second block
-
-        b2->clear();
-        b2->expand(sz2);
-
-        if (at < sz1) {
-            b1->copy_to_no_count(b2, sz1-1, 0, sz2);
-            b2->pull_ones();
-            b1->shrink_no_count(sz2);
-            b1->ones -= b2->ones;
-            b1->insert_at(at, bit);
-        } else {
-            b1->copy_to_no_count(b2, sz1, 0, at - sz1);
-            b1->copy_to_no_count(b2, at+1, at - sz1 + 1, sz - 1 - at);
-            b2->pull_ones();
-            b1->shrink_no_count(sz2-1);
-            b1->ones -= b2->ones;
-            b2->set_bit(at - sz1, bit);
-        }
-    }
-    static inline void delete_balance(Datablock *b1, Datablock *b2, ui32 at) {
-        if (b1->sz + b2->sz <= 0)
-            return;
-        const ui32 sz = b1->sz + b2->sz - 1;
-        const ui32 sz1 = sz / 2;   // size of the first block
-        const ui32 sz2 = sz - sz1; // size of the second block
-
-        if (at < b1->sz)
-            b1->remove_at(at);
-        else
-            b2->remove_at(at - b1->sz);
-
-        if (b1->sz > sz1) {
-            b2->pad_zeros_front(sz2 - b2->sz);
-            b1->copy_to_no_count(b2, sz1, 0, b1->sz - sz1);
-            b1->shrink_no_count(b1->sz - sz1);
-            b1->pull_ones();
-            b2->pull_ones();
-        } else {
-            const ui32 orig_size = b1->sz;
-            const ui32 size_diff = sz1 - b1->sz;
-            b1->expand(size_diff);
-            b2->copy_to_no_count(b1, 0, orig_size, size_diff);
-            b2->shift_backward_no_count(size_diff);
-            b1->pull_ones();
-            b2->pull_ones();
-        }
-    }
-    static inline void delete_merge_left(Datablock *b1, Datablock *b2, ui32 pos) {
-        b1->expand(b2->sz-1);
-        if (pos < b1->sz) {
-            b1->remove_at(pos);
-            b2->copy_to_no_count(b1, 0, b1->sz, b2->sz);
-            b1->ones += b2->ones;
-            b2->clear();
-        } else {
-            ui32 pos_loc = pos - b1->sz;
-            b2->copy_to_no_count(b1, 0, b1->sz, pos_loc);
-            b2->copy_to_no_count(b1, pos_loc+1, b1->sz+pos_loc, b2->sz-pos_loc-1);
-            b1->ones += b2->ones;
-            if (b2->get_bit(pos - b1->sz))
-                b1->ones--;
-            b2->clear();
-        }
-    }
-    static inline void delete_merge_right(Datablock *b1, Datablock *b2, ui32 at) {
-        if (at < b1->sz) {
-            b2->pad_zeros_front(b1->sz - 1);
-            b1->copy_to_no_count(b2, 0, 0, at);
-            b1->copy_to_no_count(b2, at+1, at, b1->sz-1-at);
-            if (b1->get_bit(at))
-                b2->ones += b1->ones - 1;
-            else
-                b2->ones += b1->ones;
-            b1->clear();
-        } else {
-            b2->remove_at(at - b1->sz);
-            b2->pad_zeros_front(b1->sz);
-            b1->copy_to(b2, 0, 0, b1->sz);
-            b2->ones += b1->ones;
-            b1->clear();
-        }
-    }
-};
-
-
-
-
+// Treap implementation of a compact dynamic bitvector, which is
+// an array of bits supporting the following operations, all in
+// O(log n) time:
+// 
+// select(i,x): Return the position of the ith x
+// rank(i,x):   Return the number of x's in [0...i)
+// erase(i):    Erase the ith element and shift everything back
+// insert(i,b): Insert b to be the ith element and shift everything
+//
+// The implementation is compact, meaning that the bits are packed
+// in an uint64_t (64 bits). However, due to the dynamic nature,
+// we can't simply just store an array of uint64_t's. Thus, we
+// split the bits into Datablocks, which is a fixed size version of
+// a dynamic bitvector supporting operations in O(n) time. Then, to
+// guarantee an even split, we ensure at run time that the number
+// of bits in each block is always within certain range, which is
+// controlled by the compile time parameter B, for the aveerage
+// number of bits in each block. Next, we store all these blocks in
+// an implicit treap for time efficient searching. When inserting
+// or deleting bits, if the number of bits move outside of the
+// range allowed, we might borrow, split, or merge with neighboring
+// blocks to guarantee the range.
+//
+// Implementation details: we store the nodes in a vector for cache
+// efficiency, thus all node pointers are 32 bit indexes to an
+// array. For nonrecursive searching, we store parent pointers. For
+// run time guarantee of the number of bits in each datablock, we
+// store the in order successor and predecessor. We also store the
+// order statistics for rank and select, and we store a random
+// priority for treap.
+// 
+// For the range of elements, a natural choice is to be bounded in
+// [B/2, 2B]. Instead, we choose [floor(2B/3), ceil(4B/3)]. For a
+// bound [l, u], we essentially only need 2l < u for the splitting
+// and merging to be within bound, and the solution such that 2l
+// is closest to u with u+l = 2B for symmetry is
+//    u = ceil( (4B-1)/3 )
+//    l = floor( (2B+1)/3 )
+// Then we remove the -1 and +1's for simplicity in formulas.
+// Thus, let 
+//  MAX_BITS  = ceil(4B/3)        = maximum number of bits in a
+//                                  data block
+//  MIN_BITS  = floor(2B/3)       = minimum number of bits in a
+//                                  data block
+//  MAX_WORDS = ceil(MAX_BITS/64) = number of uint64_t's needed to
+//                                  store the maximum number of
+//                                  bits
+//  MIN_WORDS = ceil(MIN_BITS/64) = number of uint64_t's needed to
+//                                  store the minimum number of
+//                                  bits
+// 
+// Thus, in total, the number of bytes in each Node is
+//      8 * 4 + sizeof(Datablock<MAX_WORDS>)
+//    = 32 + 8 + 8 * MAX_WORDS
+//    = 40 + 8 * MAX_WORDS
+// Let n be the number of bits in this DynamicBitvector, then we
+// need at least n/MIN_BITS nodes, which requires in total
+//   (n/MIN_BITS) * (40 + 8 * MAX_WORDS)
+// number of bytes to store n bits. Using the formula for
+// MIN_BITS and MAX_WORDS without all the ceiling and floors,
+// the number of bytes needed is 60 * n/B + n/4. This is the
+// best we can hope for in this implementation, as a byte can
+// hold at most 8 bits and we can only use 4 bits on average.
+// 
+// Lastly, all operations runs in O(Blog(n)) time, which means
+// that larger B allows for more compact representation but
+// slower speed, and smaller B allows for faster operations
+// but more space.
 template <unsigned int B>
 class DynamicBitvector {
 public:
 
+private:
+    static constexpr ui32 idx_null = UINT32_MAX;
 
-public:
-    static constexpr ui32 idx_null = SIZE_MAX;
-
-    static constexpr ui32 MAX_BITS = (4 * B + 1) / 3; // this is ceil( (4B-1)/3 )
-    static constexpr ui32 MIN_BITS = (2 * B + 1) / 3; // this is floor( (2B+1)/3 )
+    static constexpr ui32 MAX_BITS = (4 * B + 2) / 3;       // this is ceil( 4B/3 )
+    static constexpr ui32 MIN_BITS = (2 * B) / 3;           // this is floor( 2B/3 )
     static constexpr ui32 MAX_WORDS = (MAX_BITS + 63) / 64; // ceil(MAX_BITS / 64)
     static constexpr ui32 MIN_WORDS = (MIN_BITS + 63) / 64; // ceil(MIN_BITS / 64)
 
     struct Node {
+
+        // Pointers within a tree
         ui32 parent;
-        ui32 left;
-        ui32 right;
-        ui32 prev;     // doubly-linked list of data blocks
-        ui32 next;
+        ui32 left, right;
+        ui32 prev, next;  // doubly-linked list of data blocks
+
+        // Order statistics
         ui32 sub_sz;   // total bits in subtree, including this block
         ui32 sub_ones; // total 1-bits in subtree, including this block
-        ui32 prio;     // random heap priority for treap
+
+        // random heap priority for treap
+        ui32 prio;     
+
+        // Actual storage for the data
         Datablock<MAX_WORDS> bits;
+
         Node() : parent(idx_null), left(idx_null), right(idx_null), prev(idx_null), next(idx_null), sub_sz(0), sub_ones(0), bits() {};
     };
 
+    // The memory for the nodes
     std::vector<Node> nodes;
-    std::vector<ui32> free_list;
     ui32 root;
-    std::mt19937_64 rng;
 
-    // allocate or recycle a node
+    // We handle memory ourselves with a list of free nodes.
+    std::vector<ui32> free_list;
+
+    // Random number generator for treap.
+    std::minstd_rand rng;
+
+    // Allocate a new node by recycling or adjusting the vector
     ui32 alloc_node() {
         ui32 idx;
         if (!free_list.empty()) {
-            idx = free_list.back(); free_list.pop_back();
-            nodes[idx] = Node();
+            idx = free_list.back();
+            free_list.pop_back();
         } else {
-            idx = nodes.size();
-            nodes.emplace_back();
+            idx = (ui32)nodes.size();
+            nodes.push_back(Node());
         }
         Node &n = nodes[idx];
-        n.prio = rng();
-
+        n = Node();
+        std::uniform_int_distribution<ui32> dist(0, UINT32_MAX);
+        n.prio = dist(rng);
         return idx;
     }
-
+    // Deallocate or release a node.
     void dealloc_node(ui32 idx) {
         free_list.push_back(idx);
     }
 
-    // recompute subtree aggregates
+    // Recompute subtree aggregates
     void pull(ui32 idx) {
         auto &node = nodes[idx];
         node.sub_sz = node.bits.sz;
@@ -725,7 +156,8 @@ public:
             node.sub_ones += nodes[node.right].sub_ones;
         }
     }
-
+    // Recompute subtree aggregates for all the ancestors
+    // from a given node
     void pull_propagate(ui32 idx) {
         while (idx != idx_null) {
             pull(idx);
@@ -733,7 +165,9 @@ public:
         }
     }
 
-    // rotate right at idx
+    // Rotate right at idx and update all subtree
+    // aggregates and return the new node at the current
+    // place.
     ui32 rotate_right(ui32 idx) {
         ui32 L = nodes[idx].left;
         nodes[idx].left = nodes[L].right;
@@ -741,17 +175,21 @@ public:
             nodes[nodes[idx].left].parent = idx;
         nodes[L].right = idx;
         nodes[L].parent = nodes[idx].parent;
-        if (nodes[nodes[idx].parent].left == idx)
-            nodes[nodes[idx].parent].left = L;
-        else
-            nodes[nodes[idx].parent].right = L;
+        if (nodes[idx].parent != idx_null) {
+            if (nodes[nodes[idx].parent].left == idx)
+                nodes[nodes[idx].parent].left = L;
+            else
+                nodes[nodes[idx].parent].right = L;
+        }
         nodes[idx].parent = L;
 
         pull(idx);
         pull(L);
         return L;
     }
-    // rotate left at idx
+    // Rotate left at idx and update all subtree
+    // aggregates and return the new node at the current
+    // place.
     ui32 rotate_left(ui32 idx) {
         ui32 R = nodes[idx].right;
         nodes[idx].right = nodes[R].left;
@@ -759,10 +197,12 @@ public:
             nodes[nodes[idx].right].parent = idx;
         nodes[R].left = idx;
         nodes[R].parent = nodes[idx].parent;
-        if (nodes[nodes[idx].parent].left == idx)
-            nodes[nodes[idx].parent].left = R;
-        else
-            nodes[nodes[idx].parent].right = R;
+        if (nodes[idx].parent != idx_null) {
+            if (nodes[nodes[idx].parent].left == idx)
+                nodes[nodes[idx].parent].left = R;
+            else
+                nodes[nodes[idx].parent].right = R;
+        }
         nodes[idx].parent = R;
 
         pull(idx);
@@ -770,6 +210,10 @@ public:
         return R;
     }
 
+    // Helper function.
+    // Assuming at most one child potentially violates the
+    // heap property, this function rotating left or right
+    // to store the heap property.
     ui32 bubble(ui32 idx) {
         if (idx == idx_null)
             return idx_null;
@@ -780,17 +224,70 @@ public:
         else if (node_cur.right != idx_null && nodes[node_cur.right].prio > node_cur.prio)
             return rotate_left(idx);
     }
-
+    // Helper function.
+    // Assuming at most one child at this node potentially
+    // violates the heap property, this function rotating
+    // left or right to store the heap property at this
+    // node and all of its ancestors.
     void bubble_pull_propagate(ui32 idx) {
         while (idx != idx_null) {
             pull(idx);
-            idx = bubble(idx);
+            ui32 idx_new = bubble(idx);
+            if (idx_new == idx) {
+                // we can stop bubbling now
+                idx = nodes[idx].parent;
+                break;
+            }
+            if (nodes[idx].parent == idx_null)
+                root = idx;
+            idx = nodes[idx].parent;
+        }
+        while (idx != idx_null) {
+            pull(idx);
             idx = nodes[idx].parent;
         }
     }
+    // Helper function.
+    // Take the left child and attach it to the parent of
+    // the current node
+    ui32 bubble_left(ui32 idx) {
+        Node &node_cur = nodes[idx];
+        ui32 idx_left = node_cur.left;
+        ui32 idx_parent = node_cur.parent;
 
+        if (idx_left != idx_null) {
+            nodes[idx_left].parent = idx_parent;
+        }
+        if (idx_parent != idx_null) {
+            if (nodes[idx_parent].left == idx)
+                nodes[idx_parent].left = idx_left;
+            else
+                nodes[idx_parent].right = idx_left;
+        }
+        return idx_left;
+    }
+    // Helper function.
+    // Take the right child and attach it to the parent of
+    // the current node
+    ui32 bubble_right(ui32 idx) {
+        Node &node_cur = nodes[idx];
+        ui32 idx_right = node_cur.right;
+        ui32 idx_parent = node_cur.parent;
 
+        if (idx_right != idx_null) {
+            nodes[idx_right].parent = idx_parent;
+        }
+        if (idx_parent != idx_null) {
+            if (nodes[idx_parent].left == idx)
+                nodes[idx_parent].left = idx_right;
+            else
+                nodes[idx_parent].right = idx_right;
+        }
+        return idx_right;
+    }
 
+    // Insert an element into the linked list structure
+    // in the nodes
     void ll_insert_after(ui32 at, ui32 idx) {
         Node &node_at = nodes[at];
         Node &node_insert = nodes[idx];
@@ -803,6 +300,8 @@ public:
         node_at.next = idx;
     }
 
+    // Detach an element in the linked list structure
+    // in the nodes
     void ll_detach(ui32 idx) {
         if (idx == idx_null)
             return;
@@ -813,7 +312,10 @@ public:
             nodes[node_cur.next].prev = node_cur.prev;
     }
 
-
+    // Insert idx_min as the smallest element in the
+    // subtree rooted at idx, or the in order successor
+    // of idx, and return the new element for fixing
+    // the parents
     ui32 insert_min(ui32 idx, ui32 idx_min) {
         if (idx == idx_null)
             return idx_min;
@@ -840,7 +342,40 @@ public:
         return idx_cur;
     }
 
-    ui32 bisect_pos(ui32 pos, ui32 *pos_loc) {
+    // Insert idx_max as the largest element in the
+    // subtree rooted at idx, and return the new
+    // element for fixing the parents
+    ui32 insert_max(ui32 idx, ui32 idx_max) {
+        if (idx == idx_null)
+            return idx_max;
+
+        ui32 idx_parent = nodes[idx].parent;
+        ui32 idx_cur = idx;
+
+        while (nodes[idx_cur].right != idx_null)
+            idx_cur = nodes[idx_cur].right;
+
+        nodes[idx_cur].right = idx_max;
+        nodes[idx_max].parent = idx_cur;
+        pull(idx_cur);
+        if (nodes[idx_max].prio > nodes[idx_cur].prio)
+            idx_cur = rotate_left(idx_cur);
+
+        while (nodes[idx_cur].parent != idx_parent) {
+            idx_cur = nodes[idx_cur].parent;
+            pull(idx_cur);
+            if (nodes[nodes[idx_cur].right].prio > nodes[idx_cur].prio)
+                idx_cur = rotate_left(idx_cur);
+        }
+
+        return idx_cur;
+    }
+
+    // Using bisection to find the node containing the
+    // pos'th bit.
+    // out_pos_loc is a return value for the local index
+    // of the bit inside this node.
+    ui32 bisect_pos(ui32 pos, ui32 *out_pos_loc) const {
         if (pos >= size())
             throw std::out_of_range("");
 
@@ -862,11 +397,17 @@ public:
             break;
         }
 
-        *pos_loc = pos - nodes[idx].bits.sz;
+        *out_pos_loc = pos;
         return idx;
     }
 
-    ui32 bisect_pos(ui32 pos, ui32 *pos_loc, ui32 *out_ones) {
+    // Using bisection to find the node containing the
+    // pos'th bit.
+    // out_pos_loc is a return value for the local index
+    // of the bit inside this node.
+    // out_ones is the number of ones before this index
+    // in the entire array.
+    ui32 bisect_pos(ui32 pos, ui32 *out_pos_loc, ui32 *out_ones) const {
         if (pos >= size())
             throw std::out_of_range("");
 
@@ -890,13 +431,33 @@ public:
             break;
         }
 
-        *pos_loc = pos - nodes[idx].sz;
-        *out_ones = ones + nodes[idx].bits.ones_count(0, pos_loc);
+        *out_pos_loc = pos;
+        *out_ones = ones + nodes[idx].bits.rank1(pos);
         return idx;
     }
 
-    ui32 bisect_ones(ui32 pos, ui32 *pos_loc) {
-        if (pos >= size())
+    // Returns the largest node inside the subtree
+    // rooted at idx
+    ui32 node_last(ui32 idx) const {
+        if (idx == idx_null)
+            return idx_null;
+        while (nodes[idx].right != idx_null)
+            idx = nodes[idx].right;
+        return idx;
+    }
+    // Returns the smallest node inside the subtree
+    // rooted at idx
+    ui32 node_first(ui32 idx) const {
+        if (idx == idx_null)
+            return idx_null;
+        while (nodes[idx].left != idx_null)
+            idx = nodes[idx].left;
+        return idx;
+    }
+
+    // Bisection on the number of ones
+    ui32 bisect_ones(ui32 pos, ui32 *pos_loc, ui32 *pos_before) const {
+        if (root == idx_null && nodes[root].sub_ones >= pos)
             throw std::out_of_range("");
 
         ui32 idx = root;
@@ -906,32 +467,61 @@ public:
             const auto &n = nodes[idx];
             ui32 ls = (n.left == idx_null ? 0 : nodes[n.left].sub_sz);
             ui32 lo = (n.left == idx_null ? 0 : nodes[n.left].sub_ones);
-            if (pos < ls) {
+            if (pos < lo) {
                 idx = n.left;
                 continue;
             }
-            if (pos == ls)
-                return count + lo;
-            pos -= ls;
-            count += lo;
-            if (pos >= n.bits.sz) {
-                pos -= n.bits.sz;
-                count += n.bits.ones;
+            count += ls;
+            pos -= lo;
+            if (pos >= n.bits.ones) {
+                pos -= n.bits.ones;
+                count += n.bits.sz;
                 idx = n.right;
                 continue;
-
             }
             break;
         }
+        *pos_loc = nodes[idx].bits.select1(pos);
+        *pos_before = count;
+        return idx;
     }
 
 public:
-    DynamicBitvector() : root(idx_null), rng(std::random_device{}()) {};
+    DynamicBitvector() : root(idx_null), rng(129875) {};
     ~DynamicBitvector() {};
+
+    void reserve(ui32 bits_sz) {
+        ui32 max_nodes = (bits_sz + MIN_BITS - 1) / MIN_BITS;
+        free_list.reserve(max_nodes);
+        nodes.reserve(max_nodes);
+    }
+
+    void init_size(ui32 sz) {
+        ui32 node_count = sz / B;
+        ui32 node_plus_one = sz - node_count * B;
+        ui32 prev = idx_null;
+        for (ui32 i = 0; i < node_count; i++) {
+            ui32 idx = alloc_node();
+            if (i < node_plus_one) {
+                nodes[idx].bits.expand(B + 1);
+                nodes[idx].sub_sz = B + 1;
+            } else {
+                nodes[idx].bits.expand(B);
+                nodes[idx].sub_sz = B;
+            }
+            root = insert_max(root, idx);
+            if (prev != idx_null)
+                ll_insert_after(prev, idx);
+            prev = idx;
+        }
+    }
 
     // total number of bits
     ui32 size() const {
         return (root == idx_null ? 0 : nodes[root].sub_sz);
+    }
+    ui32 total_ones() const {
+        return (root == idx_null ? 0 : nodes[root].sub_ones);
     }
 
     // access bit
@@ -944,7 +534,7 @@ public:
         return nodes[idx].bits.get_bit(pos_loc);
     }
 
-    void set_bit(ui32 pos, bool bit) const {
+    void set_bit(ui32 pos, bool bit) {
         if (pos >= size())
             throw std::out_of_range("get: pos out of range");
 
@@ -980,17 +570,35 @@ public:
         else return rank0(pos);
     }
 
+    // Compute the s'th 1 in [0..size())
+    ui32 select1(ui32 s) const {
+        ui32 pos_loc, pos_before;
+        bisect_ones(s, &pos_loc, &pos_before);
+        return pos_loc + pos_before;
+    }
+
     // insert bit at pos in [0..size()]
     void insert(ui32 pos, bool bit) {
         ui32 pos_loc;
-        ui32 idx = bisect_pos(pos, &pos_loc);
-        Node &node_cur = nodes[idx];
-        ui32 sz_left = (node_cur.left == idx_null ? 0 : nodes[node_cur.left].sub_sz);
-        ui32 sz_cur = node_cur.bits.sz;
+        ui32 idx;
+        if (pos < size())
+            idx = bisect_pos(pos, &pos_loc);
+        else {
+            idx = node_last(root);
+            if (idx == idx_null) {
+                root = alloc_node();
+                idx = root;
+            }
+            pos_loc = nodes[idx].bits.sz;
+        }
+        Node *node_cur = &(nodes[idx]);
+        ui32 sz_left = (node_cur->left == idx_null ? 0 : nodes[node_cur->left].sub_sz);
+        ui32 sz_cur = node_cur->bits.sz;
 
-        if (node_cur.bits.sz + 1 <= MAX_BITS) {
+        if (node_cur->bits.sz + 1 <= MAX_BITS) {
             // If there isn't overflow
-            node_cur.bits.insert_at(pos_loc, bit);
+            // Also handles when there's an empty node
+            node_cur->bits.insert_at(pos_loc, bit);
             pull_propagate(idx);
             return;
         }
@@ -1001,15 +609,18 @@ public:
         // the count for the neighbor which is annoying
 
         ui32 idx_right = alloc_node();
-        auto &node_right = nodes[idx_right];
+        node_cur = &(nodes[idx]); // if vector was reallocated, the old address would have been garbage
+        Node &node_right = nodes[idx_right];
 
-        Datablock<MAX_WORDS>::split_insert_balance(&node_cur.bits, &node_right.bits, pos_loc, bit);
+        Datablock<MAX_WORDS>::insert_balance(&node_cur->bits, &node_right.bits, pos_loc, bit);
+        node_right.sub_sz = node_right.bits.sz;
+        node_right.sub_ones = node_right.bits.ones;
 
         // fix linked list
         ll_insert_after(idx, idx_right);
 
-        node_cur.right = insert_min(node_cur.right, idx_right);
-
+        node_cur->right = insert_min(node_cur->right, idx_right);
+        nodes[node_cur->right].parent = idx;
         // technically not needed, but logic is scrambled, hard to remove it
         // based on what each function does
         pull(idx);
@@ -1028,7 +639,7 @@ public:
         if (sz_cur > MIN_BITS) {
             // if the current node has enough bits to delete one bit
             node_cur.bits.remove_at(pos_loc);
-            pull_propagate(node_cur);
+            pull_propagate(idx);
             return;
         }
 
@@ -1062,7 +673,7 @@ public:
             // borrow from the in order predecessor
             Node &node_prev = nodes[node_cur.prev];
 
-            Datablock<MAX_WORDS>::delete_balance(&node_prev.bits, &node_cur.bits, pos_loc);
+            Datablock<MAX_WORDS>::delete_balance(&node_prev.bits, &node_cur.bits, pos_loc + node_prev.bits.sz);
 
             // If the left subtree of the current node is not empty,
             // then the in order predecessor is in the left subtree,
@@ -1072,7 +683,7 @@ public:
             // current node, in which one pull propagate on the
             // current node is enough.
             if (node_cur.left != idx_null)
-                pull_propagate(node_prev.prev);
+                pull_propagate(node_cur.prev);
             else
                 pull_propagate(idx);
             return;
@@ -1086,13 +697,14 @@ public:
             ui32 idx_next = node_cur.next;
             Node &node_next = nodes[idx_next];
             if (node_cur.right != idx_null) {
-                // if the successor is in the right subtree of node_cur
-                // then we will merge to the current node
+                // the successor is in the right subtree of node_cur
+                // so we will merge to the current node
                 Datablock<MAX_WORDS>::delete_merge_left(&node_cur.bits, &node_next.bits, pos_loc);
                 ll_detach(idx_next);
-                idx_next = rotate_left(idx_next);
-                nodes[idx_next].left = idx_null;
-                pull_propagate(idx_next);
+                ui32 idx_next_parent = node_next.parent;
+                bubble_right(idx_next);
+                dealloc_node(idx_next);
+                pull_propagate(idx_next_parent);
                 return;
             }
 
@@ -1101,9 +713,10 @@ public:
             // and remove the current node.
             Datablock<MAX_WORDS>::delete_merge_right(&node_cur.bits, &node_next.bits, pos_loc);
             ll_detach(idx);
-            idx = rotate_right(idx);
-            nodes[idx].right = idx_null;
-            pull_propagate(idx);
+            ui32 idx_parent = node_cur.parent;
+            bubble_left(idx);
+            dealloc_node(idx);
+            pull_propagate(idx_parent);
             return;
         }
 
@@ -1112,28 +725,32 @@ public:
             ui32 idx_prev = node_cur.prev;
             Node &node_prev = nodes[idx_prev];
             if (node_cur.left != idx_null) {
-                // if the predecessor is in the left subtree of node_cur
-                // then we will merge to the current node
-                Datablock<MAX_WORDS>::delete_merge_right(&node_prev.bits, &node_cur.bits, pos_loc);
+                // the predecessor is in the left subtree of node_cur
+                // so we will merge to the current node
+                Datablock<MAX_WORDS>::delete_merge_right(&node_prev.bits, &node_cur.bits, pos_loc + node_prev.bits.sz);
                 ll_detach(idx_prev);
-                idx_prev = rotate_right(idx_prev);
-                nodes[idx_prev].left = idx_null;
-                pull_propagate(idx_prev);
+                ui32 idx_prev_parent = node_prev.parent;
+                bubble_left(idx_prev);
+                dealloc_node(idx_prev);
+                pull_propagate(idx_prev_parent);
                 return;
             }
 
-            // If the right subtree is empty, the successor must be
+            // If the left subtree is empty, the predecessor must be
             // one of its ancestor. In which case we merge to the ancestor
             // and remove the current node.
-            Datablock<MAX_WORDS>::delete_merge_right(&node_prev.bits, &node_cur.bits, pos_loc);
+            Datablock<MAX_WORDS>::delete_merge_left(&node_prev.bits, &node_cur.bits, pos_loc + node_prev.bits.sz);
             ll_detach(idx);
-            idx = rotate_right(idx);
-            nodes[idx].right = idx_null;
-            pull_propagate(idx);
+            ui32 idx_parent = node_cur.parent;
+            bubble_right(idx);
+            dealloc_node(idx);
+            pull_propagate(idx_parent);
             return;
         }
 
-        // the last case has to be true, or there's an error
+        // This happens when the tree is just a single node,
+        // so we are going to just delete it.
+        nodes[idx].bits.remove_at(pos);
     }
 };
 

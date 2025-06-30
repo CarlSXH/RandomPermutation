@@ -1427,7 +1427,7 @@ int AVLTest()
 {
     AVLTree avlTree;
 
-#define Num 2000
+#define Num 2000000
 
 
     device = RandDevice::SetSeed(1798297);
