@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstdint>
 #include "Datablock.h"
+#include <iostream>
 
 
 using ui32 = uint32_t;
@@ -223,6 +224,7 @@ private:
             return rotate_right(idx);
         else if (node_cur.right != idx_null && nodes[node_cur.right].prio > node_cur.prio)
             return rotate_left(idx);
+        return idx;
     }
     // Helper function.
     // Assuming at most one child at this node potentially
@@ -238,9 +240,9 @@ private:
                 idx = nodes[idx].parent;
                 break;
             }
-            if (nodes[idx].parent == idx_null)
-                root = idx;
-            idx = nodes[idx].parent;
+            if (nodes[idx_new].parent == idx_null)
+                root = idx_new;
+            idx_new = nodes[idx_new].parent;
         }
         while (idx != idx_null) {
             pull(idx);
@@ -457,7 +459,7 @@ private:
 
     // Bisection on the number of ones
     ui32 bisect_ones(ui32 pos, ui32 *pos_loc, ui32 *pos_before) const {
-        if (root == idx_null && nodes[root].sub_ones >= pos)
+        if (root == idx_null || nodes[root].sub_ones >= pos)
             throw std::out_of_range("");
 
         ui32 idx = root;
@@ -487,7 +489,7 @@ private:
     }
 
 public:
-    DynamicBitvector() : root(idx_null), rng(129875) {};
+    DynamicBitvector() : root(idx_null), rng() {};
     ~DynamicBitvector() {};
 
     void reserve(ui32 bits_sz) {
@@ -498,16 +500,27 @@ public:
 
     void init_size(ui32 sz) {
         ui32 node_count = sz / B;
-        ui32 node_plus_one = sz - node_count * B;
+
+        if (node_count <= 0) {
+            ui32 idx = alloc_node();
+            nodes[idx].bits.expand(sz);
+            nodes[idx].sub_sz = sz;
+            root = idx;
+            return;
+        }
+
+        ui32 node_remaining = sz - node_count * B;
+        ui32 node_plus_one = node_remaining % node_count;
+        ui32 node_const_shift = node_remaining / node_count;
         ui32 prev = idx_null;
         for (ui32 i = 0; i < node_count; i++) {
             ui32 idx = alloc_node();
             if (i < node_plus_one) {
-                nodes[idx].bits.expand(B + 1);
-                nodes[idx].sub_sz = B + 1;
+                nodes[idx].bits.expand(B + node_const_shift + 1);
+                nodes[idx].sub_sz = B + node_const_shift + 1;
             } else {
-                nodes[idx].bits.expand(B);
-                nodes[idx].sub_sz = B;
+                nodes[idx].bits.expand(B + node_const_shift);
+                nodes[idx].sub_sz = B + node_const_shift;
             }
             root = insert_max(root, idx);
             if (prev != idx_null)
@@ -520,7 +533,7 @@ public:
     ui32 size() const {
         return (root == idx_null ? 0 : nodes[root].sub_sz);
     }
-    ui32 total_ones() const {
+    ui32 ones() const {
         return (root == idx_null ? 0 : nodes[root].sub_ones);
     }
 
@@ -751,6 +764,18 @@ public:
         // This happens when the tree is just a single node,
         // so we are going to just delete it.
         nodes[idx].bits.remove_at(pos);
+    }
+
+    void print() const {
+        if (size() <= 0)
+            return;
+        std::ostream &s = std::cout;
+        ui32 loc_pos = 0;
+        ui32 node = bisect_pos(0, &loc_pos);
+        while (node != idx_null) {
+            nodes[node].bits.print(s);
+            node = nodes[node].next;
+        }
     }
 };
 

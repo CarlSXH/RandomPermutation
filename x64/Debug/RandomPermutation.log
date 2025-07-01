@@ -1,3 +1,2 @@
 ﻿  Testing.cpp
-C:\Users\carls\Documents\Visual Studio 2022\Projects\RandomPermutation\RandomPermutation\DynamicBitvector.h(226,1): warning C4715: 'DynamicBitvector<128>::bubble': not all control paths return a value
   RandomPermutation.vcxproj -> C:\Users\carls\Documents\Visual Studio 2022\Projects\RandomPermutation\x64\Debug\RandomPermutation.exe

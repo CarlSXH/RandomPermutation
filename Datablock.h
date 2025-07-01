@@ -135,6 +135,11 @@ public:
             data[w] &= ~(1ULL << b);
     }
 
+    void print(std::ostream &s) const {
+        for (ui32 i = 0; i < sz; i++)
+            s << get_bit(i);
+    }
+
     // Return the next 64 bits at the pos'th bit in this stream.
     inline uint64_t get_bits64(const ui32 &pos) const {
 #if defined(_BOUND_CHECKING)
