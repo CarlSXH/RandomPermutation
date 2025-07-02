@@ -171,6 +171,10 @@ public:
 
                 vector<T> cur_list = cur_vals[j];
 
+                if (i == 13) {
+                    int aoiwja = 0;
+                }
+
                 layers[i][j].init_size(static_cast<ui32>(cur_list.size()));
 
                 layer_a.push_back(a);
@@ -231,8 +235,6 @@ public:
         ui32 index = 0;
         ui32 pos_loc = pos;
         
-
-
         for (ui32 i = 0; i <= max_depth; i++) {
             T m = middle(a, b);
             DynamicBitvector<B> &cur_node = layers[i][index];
@@ -277,16 +279,137 @@ public:
         size++;
     }
     void set_value(ui32 pos, T key) {
+        ui32 index_parent = 0;
+        ui32 a = 0, b = alph_size;
+        ui32 split_depth;
+        bool broke = false;
+        bool bit_orig = false;
+        bool bit_new;
+        ui32 rank1;
+
+        for (split_depth = 0; split_depth <= max_depth; split_depth++) {
+            ui32 m = middle(a, b);
+            
+            bit_orig = layers[split_depth][index_parent].get_bit_rank(pos, &rank1);
+            bit_new = key >= m;
+            if (bit_orig != bit_new) {
+                broke = true;
+                break;
+            }
+            if (bit_new) {
+                pos = rank1;
+                a = m;
+                index_parent = child_right(index_parent);
+            } else {
+                pos = pos - rank1;
+                b = m;
+                index_parent = child_left(index_parent);
+            }
+        }
+
+        if (!broke) {
+            leaf_values[index_parent][pos] = key;
+            return;
+        }
+
+        layers[split_depth][index_parent].set_bit(pos, bit_new);
+
+        ui32 index_orig, index_new;
+        ui32 a_orig, a_new;
+        ui32 b_orig, b_new;
+        ui32 pos_orig, pos_new;
+        ui32 m = middle(a, b);
+
+        if (bit_orig) {
+            index_orig = child_right(index_parent);
+            index_new = child_left(index_parent);
+            a_orig = m;
+            b_orig = b;
+            a_new = a;
+            b_new = m;
+            pos_orig = rank1;
+            pos_new = pos - rank1;
+        } else {
+            index_orig = child_left(index_parent);
+            index_new = child_right(index_parent);
+            a_orig = a;
+            b_orig = m;
+            a_new = m;
+            b_new = b;
+            pos_orig = pos - rank1;
+            pos_new = rank1;
+        }
+
+        for (ui32 i_orig = split_depth + 1; i_orig <= max_depth; i_orig++) {
+            ui32 m_orig = middle(a_orig, b_orig);
+            bool removed_bit = layers[i_orig][index_orig].get_bit_rank(pos_orig, &rank1);
+
+            layers[i_orig][index_orig].erase(pos_orig);
+
+            if (removed_bit) {
+                index_orig = child_right(index_orig);
+                b_orig = m_orig;
+                pos_orig = rank1;
+            } else {
+                index_orig = child_left(index_orig);
+                a_orig = m_orig;
+                pos_orig = pos_orig - rank1;
+            }
+        }
+        leaf_values[index_orig].erase(leaf_values[index_orig].begin() + pos_orig);
+
+        for (ui32 i_new = split_depth + 1; i_new <= max_depth; i_new++) {
+            ui32 m_new = middle(a_new, b_new);
+            if (key >= m_new) {
+                layers[i_new][index_new].insert(pos_new, true);
+                pos_new = layers[i_new][index_new].rank1(pos_new);
+                index_new = child_right(index_new);
+                a_new = m_new;
+            } else {
+                layers[i_new][index_new].insert(pos_new, false);
+                pos_new = layers[i_new][index_new].rank0(pos_new);
+                index_new = child_left(index_new);
+                b_new = m_new;
+            }
+        }
+        leaf_values[index_new].insert(leaf_values[index_new].begin() + pos_new, key);
     }
     T get_value(ui32 pos) const {
+        ui32 index = 0;
+        ui32 a = 0, b = alph_size;
 
+        for (ui32 i = 0; i <= max_depth; i++) {
+            ui32 m = middle(a, b);
+            ui32 rank1;
+            if (layers[i][index].get_bit_rank(pos, &rank1)) {
+                pos = rank1;
+                index = child_right(index);
+                b = m;
+            } else {
+                pos = pos - rank1;
+                index = child_right(index);
+                b = m;
+            }
+        }
+        return leaf_values[index][pos];
+    }
+
+    static ui32 inline range_count(const ui32 *permutation, ui32 pos_l, ui32 pos_r, ui32 L, ui32 U) {
+        ui32 count = 0;
+        for (ui32 i = pos_l; i < pos_r; i++)
+            if (L <= permutation[i] && permutation[i] < U)
+                count++;
+        return count;
     }
 
     // Count the number of points in position [pos_l...pos_r)
     // within range [L, U).
-    ui32 range(ui32 pos_l, ui32 pos_r, T L, T U) const {
+    ui32 range(ui32 pos_l, ui32 pos_r, T L, T U, T *permutation = NULL) const {
         if (U <= L || pos_r <= pos_l)
             return 0;
+
+        ui32 orig_pos_l = pos_l, orig_pos_r = pos_r;
+
         ui32 index_parent = 0;
         ui32 a = 0, b = alph_size;
         ui32 split_depth;
@@ -327,8 +450,8 @@ public:
 
         ui32 pos_r_l = layers[split_depth][index_parent].rank1(pos_l);
         ui32 pos_r_r = layers[split_depth][index_parent].rank1(pos_r);
-        ui32 pos_l_l = layers[split_depth][index_parent].rank0(pos_l);
-        ui32 pos_l_r = layers[split_depth][index_parent].rank0(pos_r);
+        ui32 pos_l_l = pos_l - pos_r_l;
+        ui32 pos_l_r = pos_r - pos_r_r;
 
         if (split_depth == max_depth) {
             // We need to split the last layer.
@@ -345,52 +468,89 @@ public:
         ui32 a_l = a, b_l = middle(a, b);
         ui32 m_l, i_l;
 
+
+
+
         for (i_r = split_depth + 1; i_r < max_depth; i_r++) {
             m_r = middle(a_r, b_r);
+            ui32 rank1_l = layers[i_r][index_r].rank1(pos_r_l);
+            ui32 rank1_r = layers[i_r][index_r].rank1(pos_r_r);
+            ui32 rank0_l = pos_r_l - rank1_l;
+            ui32 rank0_r = pos_r_r - rank1_r;
             if (U < m_r) {
                 b_r = m_r;
-                pos_r_l = layers[i_r][index_r].rank0(pos_r_l);
-                pos_r_r = layers[i_r][index_r].rank0(pos_r_r);
+                pos_r_l = rank0_l;
+                pos_r_r = rank0_r;
                 index_r = child_left(index_r);
             } else {
-                count += layers[i_r][index_r].rank0(pos_r_r) - layers[i_r][index_r].rank0(pos_r_l);
+                ui32 added = rank0_r - rank0_l;
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, a_r, m_r);
+                assert(right_count == added);
+                count += rank0_r - rank0_l;
+
                 a_r = m_r;
-                pos_r_l = layers[i_r][index_r].rank1(pos_r_l);
-                pos_r_r = layers[i_r][index_r].rank1(pos_r_r);
+                pos_r_l = rank1_l;
+                pos_r_r = rank1_r;
                 index_r = child_right(index_r);
             }
             if (m_r == U)
                 break;
         }
+
+
+
         if (a_r < U) {
             m_r = middle(a_r, b_r);
+            ui32 rank1_l = layers[i_r][index_r].rank1(pos_r_l);
+            ui32 rank1_r = layers[i_r][index_r].rank1(pos_r_r);
+            ui32 rank0_l = pos_r_l - rank1_l;
+            ui32 rank0_r = pos_r_r - rank1_r;
+
             if (m_r <= U) {
-                count += layers[i_r][index_r].rank0(pos_r_r) - layers[i_r][index_r].rank0(pos_r_l);
+                count += rank0_r - rank0_l;
+
+                ui32 added = rank0_r - rank0_l;
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, a_r, m_r);
+                assert(right_count == added);
             }
             if (m_r < U) {
-                pos_r_l = layers[i_r][index_r].rank1(pos_r_l);
-                pos_r_r = layers[i_r][index_r].rank1(pos_r_r);
-                count += range_raw(leaf_values[child_right(index_r)], pos_r_l, pos_r_r, L, U);
+                count += range_raw(leaf_values[child_right(index_r)], rank1_l, rank1_r, L, U);
+
+                ui32 added = range_raw(leaf_values[child_right(index_r)], rank1_l, rank1_r, L, U);
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, m_r, U);
+                assert(right_count == added);
             }
             if (m_r > U) {
-                pos_r_l = layers[i_r][index_r].rank0(pos_r_l);
-                pos_r_r = layers[i_r][index_r].rank0(pos_r_r);
-                count += range_raw(leaf_values[child_left(index_r)], pos_r_l, pos_r_r, L, U);
+                count += range_raw(leaf_values[child_left(index_r)], rank0_l, rank0_r, L, U);
+
+                ui32 added = range_raw(leaf_values[child_left(index_r)], rank0_l, rank0_r, L, U);
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, a_r, U);
+                assert(right_count == added);
             }
         }
 
+
         for (i_l = split_depth + 1; i_l < max_depth; i_l++) {
             m_l = middle(a_l, b_l);
+            ui32 rank1_l = layers[i_l][index_l].rank1(pos_l_l);
+            ui32 rank1_r = layers[i_l][index_l].rank1(pos_l_r);
+            ui32 rank0_l = pos_l_l - rank1_l;
+            ui32 rank0_r = pos_l_r - rank1_r;
             if (L <= m_l) {
-                count += layers[i_l][index_l].rank1(pos_l_r) - layers[i_l][index_l].rank1(pos_l_l);
+                count += rank1_r - rank1_l;
+
+                ui32 added = rank1_r - rank1_l;
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, m_l, b_l);
+                assert(right_count == added);
+
                 b_l = m_l;
-                pos_l_l = layers[i_l][index_l].rank0(pos_l_l);
-                pos_l_r = layers[i_l][index_l].rank0(pos_l_r);
+                pos_l_l = rank0_l;
+                pos_l_r = rank0_r;
                 index_l = child_left(index_l);
             } else {
                 a_l = m_l;
-                pos_l_l = layers[i_l][index_l].rank1(pos_l_l);
-                pos_l_r = layers[i_l][index_l].rank1(pos_l_r);
+                pos_l_l = rank1_l;
+                pos_l_r = rank1_r;
                 index_l = child_right(index_l);
             }
             if (m_l == L) {
@@ -400,20 +560,33 @@ public:
 
         if (L < b_l) {
             m_l = middle(a_l, b_l);
+            ui32 rank1_l = layers[i_l][index_l].rank1(pos_l_l);
+            ui32 rank1_r = layers[i_l][index_l].rank1(pos_l_r);
+            ui32 rank0_l = pos_l_l - rank1_l;
+            ui32 rank0_r = pos_l_r - rank1_r;
             if (L <= m_l) {
-                count += layers[i_l][index_l].rank1(pos_l_r) - layers[i_l][index_l].rank1(pos_l_l);
+                count += rank1_r - rank1_l;
+
+                ui32 added = rank1_r - rank1_l;
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, m_l, b_l);
+                assert(right_count == added);
             }
             if (m_l > L) {
-                pos_l_l = layers[i_l][index_l].rank0(pos_l_l);
-                pos_l_r = layers[i_l][index_l].rank0(pos_l_r);
-                count += range_raw(leaf_values[child_left(index_l)], pos_l_l, pos_l_r, L, U);
+                count += range_raw(leaf_values[child_left(index_l)], rank0_l, rank0_r, L, U);
+
+                ui32 added = range_raw(leaf_values[child_left(index_l)], rank0_l, rank0_r, L, U);
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, L, m_l);
+                assert(right_count == added);
             }
             if (m_l < L) {
-                pos_l_l = layers[i_l][index_l].rank1(pos_l_l);
-                pos_l_r = layers[i_l][index_l].rank1(pos_l_r);
-                count += range_raw(leaf_values[child_right(index_l)], pos_l_l, pos_l_r, L, U);
+                count += range_raw(leaf_values[child_right(index_l)], rank1_l, rank1_r, L, U);
+
+                ui32 added = range_raw(leaf_values[child_right(index_l)], rank1_l, rank1_r, L, U);
+                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, L, b_l);
+                assert(right_count == added);
             }
         }
+
 
         return count;
     }
