@@ -2,20 +2,24 @@
 #ifndef __WAVELET_TREE_H__
 #define __WAVELET_TREE_H__
 
-#include "DynamicBitvector.h"
+#include "DynamicBitvectorBTree.h"
 #include <vector>
 #include <iostream>
 
 using std::vector;
 typedef uint32_t ui32;
+using std::cout;
+using std::endl;
 
-template<typename T, ui32 B>
+template<typename T, ui32 B, ui32 LeafBits>
 class WaveletTree {
 
 private:
     bool reserved;
 
-    vector<vector<DynamicBitvector<B>>> layers;
+    typedef DynamicBitvectorBTree<B, LeafBits> DB;
+
+    vector<vector<DB>> layers;
     vector<vector<T>> leaf_values;
 
     ui32 alph_size;
@@ -85,13 +89,13 @@ public:
             throw std::logic_error("The internal memory has already been reserved! Please clear it before reserving again.");
 
         reserved = true;
-        layers = vector<vector<DynamicBitvector<B>>>(max_depth + 1);
+        layers = vector<vector<DB>>(max_depth + 1);
 
         ui32 layer_size = 1;
         ui32 layer_width = new_size;
         for (ui32 i = 0; i <= max_depth; i++) {
-            vector<DynamicBitvector<B>> &cur_layer = layers[i];
-            cur_layer = vector<DynamicBitvector<B>>(layer_size);
+            vector<DB> &cur_layer = layers[i];
+            cur_layer = vector<DB>(layer_size);
             for (ui32 j = 0; j < layer_size; j++)
                 cur_layer[j].reserve(layer_width);
 
@@ -133,7 +137,7 @@ public:
         s << "------------------------end tree------------------------"; 
         s << std::endl;
     }
-    void create_array(const T *p_new_values, const ui32 new_size) {
+    void create_array(const T *p_new_values, const ui32 new_size, bool verbose = false) {
         if (max_depth == 0)
             throw std::logic_error("The maximum depth is not initialized! Call set_max_depth to set the depth.");
         if (alph_size <= 1)
@@ -153,6 +157,8 @@ public:
         layer_b.push_back(alph_size);
 
         for (ui32 i = 0; i <= max_depth; i++) {
+            if (verbose)
+                cout << "Creating layer " << i << endl;
             ui32 layer_size = static_cast<ui32>(layer_vals.size());
             vector<ui32> cur_a(layer_a.begin(), layer_a.end());
             vector<ui32> cur_b(layer_b.begin(), layer_b.end());
@@ -170,10 +176,6 @@ public:
                 ui32 m = middle(a, b);
 
                 vector<T> cur_list = cur_vals[j];
-
-                if (i == 13) {
-                    int aoiwja = 0;
-                }
 
                 layers[i][j].init_size(static_cast<ui32>(cur_list.size()));
 
@@ -213,8 +215,8 @@ public:
         if (!reserved)
             reserve(new_size, 1);
 
-        vector<DynamicBitvector<B>> &root_layer = layers[0];
-        DynamicBitvector<B> &root = root_layer[0];
+        vector<DB> &root_layer = layers[0];
+        DB &root = root_layer[0];
 
         for (ui32 i = 0; i < new_size; i++) {
             if (i % 100000 == 0) {
@@ -237,7 +239,7 @@ public:
         
         for (ui32 i = 0; i <= max_depth; i++) {
             T m = middle(a, b);
-            DynamicBitvector<B> &cur_node = layers[i][index];
+            DB &cur_node = layers[i][index];
             cur_node.insert(pos_loc, key >= m);
 
             if (key >= m) {
@@ -260,7 +262,7 @@ public:
 
         for (ui32 i = 0; i <= max_depth; i++) {
             T m = middle(a, b);
-            DynamicBitvector<B> &cur_node = layers[i][index];
+            DB &cur_node = layers[i][index];
             ui32 next_pos;
             if (cur_node.get_bit(pos)) {
                 a = m;
@@ -404,7 +406,7 @@ public:
 
     // Count the number of points in position [pos_l...pos_r)
     // within range [L, U).
-    ui32 range(ui32 pos_l, ui32 pos_r, T L, T U, T *permutation = NULL) const {
+    ui32 range(ui32 pos_l, ui32 pos_r, T L, T U) const {
         if (U <= L || pos_r <= pos_l)
             return 0;
 
@@ -483,11 +485,7 @@ public:
                 pos_r_r = rank0_r;
                 index_r = child_left(index_r);
             } else {
-                ui32 added = rank0_r - rank0_l;
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, a_r, m_r);
-                assert(right_count == added);
                 count += rank0_r - rank0_l;
-
                 a_r = m_r;
                 pos_r_l = rank1_l;
                 pos_r_r = rank1_r;
@@ -506,27 +504,12 @@ public:
             ui32 rank0_l = pos_r_l - rank1_l;
             ui32 rank0_r = pos_r_r - rank1_r;
 
-            if (m_r <= U) {
+            if (m_r <= U)
                 count += rank0_r - rank0_l;
-
-                ui32 added = rank0_r - rank0_l;
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, a_r, m_r);
-                assert(right_count == added);
-            }
-            if (m_r < U) {
+            if (m_r < U)
                 count += range_raw(leaf_values[child_right(index_r)], rank1_l, rank1_r, L, U);
-
-                ui32 added = range_raw(leaf_values[child_right(index_r)], rank1_l, rank1_r, L, U);
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, m_r, U);
-                assert(right_count == added);
-            }
-            if (m_r > U) {
+            if (m_r > U)
                 count += range_raw(leaf_values[child_left(index_r)], rank0_l, rank0_r, L, U);
-
-                ui32 added = range_raw(leaf_values[child_left(index_r)], rank0_l, rank0_r, L, U);
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, a_r, U);
-                assert(right_count == added);
-            }
         }
 
 
@@ -538,11 +521,6 @@ public:
             ui32 rank0_r = pos_l_r - rank1_r;
             if (L <= m_l) {
                 count += rank1_r - rank1_l;
-
-                ui32 added = rank1_r - rank1_l;
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, m_l, b_l);
-                assert(right_count == added);
-
                 b_l = m_l;
                 pos_l_l = rank0_l;
                 pos_l_r = rank0_r;
@@ -564,27 +542,12 @@ public:
             ui32 rank1_r = layers[i_l][index_l].rank1(pos_l_r);
             ui32 rank0_l = pos_l_l - rank1_l;
             ui32 rank0_r = pos_l_r - rank1_r;
-            if (L <= m_l) {
+            if (L <= m_l)
                 count += rank1_r - rank1_l;
-
-                ui32 added = rank1_r - rank1_l;
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, m_l, b_l);
-                assert(right_count == added);
-            }
-            if (m_l > L) {
+            if (m_l > L)
                 count += range_raw(leaf_values[child_left(index_l)], rank0_l, rank0_r, L, U);
-
-                ui32 added = range_raw(leaf_values[child_left(index_l)], rank0_l, rank0_r, L, U);
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, L, m_l);
-                assert(right_count == added);
-            }
-            if (m_l < L) {
+            if (m_l < L)
                 count += range_raw(leaf_values[child_right(index_l)], rank1_l, rank1_r, L, U);
-
-                ui32 added = range_raw(leaf_values[child_right(index_l)], rank1_l, rank1_r, L, U);
-                ui32 right_count = range_count(permutation, orig_pos_l, orig_pos_r, L, b_l);
-                assert(right_count == added);
-            }
         }
 
 
