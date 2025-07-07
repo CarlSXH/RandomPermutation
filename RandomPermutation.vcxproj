@@ -96,6 +96,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -110,6 +111,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <OmitFramePointers>
+      </OmitFramePointers>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -130,6 +133,9 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <OmitFramePointers>
+      </OmitFramePointers>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -145,12 +151,14 @@
     <ClCompile Include="RandPerm.cpp" />
     <ClCompile Include="SegmentTree.cpp" />
     <ClCompile Include="Testing.cpp" />
-    <ClCompile Include="WaveletTree.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AVLTree.h" />
+    <ClInclude Include="utils.h" />
+    <ClInclude Include="ContiguousAllocator.h" />
     <ClInclude Include="Datablock.h" />
     <ClInclude Include="DynamicBitvector.h" />
+    <ClInclude Include="DynamicBitvectorBTree.h" />
     <ClInclude Include="MyRandom.h" />
     <ClInclude Include="RandPerm.h" />
     <ClInclude Include="SegmentTree.h" />

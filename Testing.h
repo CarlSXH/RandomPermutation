@@ -12,6 +12,8 @@ void DatablockTest();
 
 void DynamicBitvectorTest();
 
+void DynamicBitvectorBTest();
+
 void GeneralTest();
 
 

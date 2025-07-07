@@ -16,6 +16,7 @@
 
 
 #include "WaveletTree.h"
+#include "DynamicBitvectorBTree.h"
 
 using namespace std;
 
@@ -1249,6 +1250,205 @@ void DynamicBitvectorTest() {
     cout << "Removing test finished" << endl;
 }
 
+void release_assert(bool b, const char *a) {
+    if (!b) {
+        cout << a;
+        int n;
+        cin >> n;
+    }
+}
+
+void test_b_dynamic_bitvector_general() {
+    ui32 n = 50000;
+    DynamicBitvectorBTree<12, 128> b;
+    vector<bool> vec;
+    vec.reserve(n);
+
+    std::minstd_rand rng(_RANDOM_SEED);
+
+    ui32 ones = 0;
+
+    ui32 k_debug = 57607;
+
+    for (ui32 i = 0; i < n; i++) {
+        uniform_int_distribution<ui32> dist(0, 1);
+        bool bit = dist(rng) == 1;
+        uniform_int_distribution<ui32> dist_index(0, i);
+        ui32 index = i;// dist_index(rng);
+        if (i % 5000 == 0 && !b.check()) {
+            int oaighw = 0;
+        }
+        if (i == k_debug) {
+            int l = 0;
+        }
+        b.insert(index, bit);
+        vec.insert(vec.begin() + index, bit);
+        release_assert(b.size() == i + 1, "INSERT SIZE");
+        if (bit)
+            ones++;
+        release_assert(b.ones() == ones, "INSERT ONES");
+
+        if (!b.check()) {
+            int aogihaw = 0;
+            release_assert(false, "INSERT CHECK");
+        }
+
+        if (i % 5000 == 0)
+            cout << i << " th element inserted!" << endl;
+    }
+
+    for (ui32 i = 0; i < n; i++) {
+        release_assert(b.get_bit(i) == vec[i], "INSERT BITS");
+    }
+
+    for (ui32 i = 1; i <= n; i++) {
+        uniform_int_distribution<ui32> dist(0, n-i);
+        ui32 delete_pos = dist(rng);
+
+        if (i == k_debug) {
+            int aoigawohga = 0;
+        }
+
+        b.erase(delete_pos);
+
+        if (!b.check()) {
+            int aogihaw = 0;
+            release_assert(false, "REMOVE CHECK");
+        }
+
+        release_assert(b.size() == n-i, "REMOVE SIZE");
+        //if (vec[delete_pos])
+        //    ones--;
+        //release_assert(b.ones() == ones, "REMOVE ONES");
+
+        //vec.erase(vec.begin() + delete_pos);
+
+
+        if (i % 1000 == 0)
+            cout << i << " th element removed!" << endl;
+
+        //for (ui32 j = 0; j < n-i; j++) {
+        //    release_assert(b.get_bit(j) == vec[j], "REMOVE BITS");
+        //}
+    }
+
+}
+void test_b_dynamic_bitvector_select() {
+    ui32 n = 10000;
+    DynamicBitvectorBTree<12, 128> b;
+    vector<bool> vec(n);
+
+    std::minstd_rand rng(_RANDOM_SEED);
+
+    ui32 ones = 0;
+
+    for (ui32 i = 0; i < n; i++) {
+        uniform_int_distribution<ui32> dist(0, 1);
+        bool bit = dist(rng) == 1;
+        b.insert(i, bit);
+        vec[i] = bit;
+        if (bit)
+            ones++;
+    }
+    rng.~minstd_rand();
+
+    for (ui32 i = 0; i < n; i++) {
+        assert(b.get_bit(i) == vec[i]);
+    }
+
+    ui32 last_loc = -1;
+
+    for (ui32 i = 0; i < ones; i++) {
+        last_loc++;
+        while (!vec[last_loc])
+            last_loc++;
+        //assert(b.select1(i) == last_loc);
+    }
+}
+void test_b_dynamic_bitvector_rank() {
+    ui32 n = 10000;
+    DynamicBitvectorBTree<12, 128> b;
+    vector<bool> vec(n);
+
+    std::minstd_rand rng(_RANDOM_SEED);
+
+    ui32 ones = 0;
+
+    for (ui32 i = 0; i < n; i++) {
+        uniform_int_distribution<ui32> dist(0, 1);
+        bool bit = dist(rng) == 1;
+        b.insert(i, bit);
+        vec[i] = bit;
+        if (bit)
+            ones++;
+    }
+
+    for (ui32 i = 0; i < n; i++) {
+        assert(b.get_bit(i) == vec[i]);
+    }
+
+    ui32 ones_count = 0;
+    for (ui32 i = 0; i < n; i++) {
+
+        assert(b.rank1(i) == ones_count);
+        assert(b.rank0(i) == i - ones_count);
+        if (vec[i])
+            ones_count++;
+    }
+}
+void test_b_dynamic_bitvector_removing() {
+
+    ui32 n = 10000;
+    DynamicBitvectorBTree<12, 128> b;
+    vector<bool> vec(n);
+
+    b.reserve(n);
+    b.init_size(n);
+
+
+    if (!b.check()) {
+        int aoigwhaw = 0;
+    }
+
+
+    std::minstd_rand rng(_RANDOM_SEED);
+
+    ui32 ones = 0;
+
+    for (ui32 i = 0; i < n; i++) {
+        uniform_int_distribution<ui32> dist(0, 1);
+        bool bit = dist(rng) == 1;
+        b.set_bit(i, bit);
+        vec[i] = bit;
+        if (bit)
+            ones++;
+    }
+
+    ui32 nodes_to_delete = 10000;
+
+    for (ui32 i = 0; i < nodes_to_delete; i++) {
+        uniform_int_distribution<ui32> dist(0, n - i - 1);
+        ui32 delete_pos = dist(rng);
+
+        b.erase(delete_pos);
+        vec.erase(vec.begin() + delete_pos);
+    }
+
+    for (ui32 j = 0; j < n - nodes_to_delete; j++) {
+        assert(b.get_bit(j) == vec[j]);
+    }
+}
+void DynamicBitvectorBTest() {
+    test_b_dynamic_bitvector_general();
+    cout << "General test finished" << endl;
+    test_b_dynamic_bitvector_select();
+    cout << "Select test finished" << endl;
+    test_b_dynamic_bitvector_rank();
+    cout << "Rank test finished" << endl;
+    test_b_dynamic_bitvector_removing();
+    cout << "Removing test finished" << endl;
+}
+
 ui32 range_count(const ui32 *permutation, ui32 pos_l, ui32 pos_r, ui32 L, ui32 U) {
     ui32 count = 0;
     for (ui32 i = pos_l; i < pos_r; i++)
@@ -1257,13 +1457,262 @@ ui32 range_count(const ui32 *permutation, ui32 pos_l, ui32 pos_r, ui32 L, ui32 U
     return count;
 }
 
+template<ui32 LeafBits, ui32 B>
+void WaveletTreeSpeedTest(ui32 *permutation, ui32 min_size, ui32 n, ui32 iteration, float *update, float *op, float *orig, bool verbose = false) {
+
+    std::minstd_rand rng(_RANDOM_SEED);
+
+    WaveletTree<ui32, LeafBits, B> wt;
+    wt.set_alph_size(n);
+    wt.set_max_depth_leaf(n, min_size);
+    wt.reserve(n, 2);
+
+    if (verbose) {
+        cout << "Creating the wavelet tree" << endl;
+    }
+    wt.create_array(permutation, n, verbose);
+
+    float opTime = 0;
+    float origTime = 0;
+    int sampleCount = 0;
+    float avgSwitchSpeed = 0;
+
+
+    if (verbose) {
+        cout << "Start testing" << endl;
+    }
+
+    for (int sampleCount = 0; sampleCount < iteration; sampleCount++) {
+        uniform_int_distribution<int> distL(0, n - 1);
+        uniform_int_distribution<int> distU(0, n);
+        int L = distL(rng);
+        int U = distU(rng);
+
+        if (L > U) {
+            int temp = L;
+            L = U;
+            U = temp;
+        }
+
+        int a = 0, b = 0;
+
+        while (a == b) {
+            a = distL(rng);
+            b = distU(rng);
+
+            if (a > b) {
+                int temp = b;
+                b = a;
+                a = temp;
+            }
+        }
+
+        auto startOp = chrono::high_resolution_clock::now();
+        int op = wt.range(a, b, L, U);
+        auto endOp = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedOp = endOp - startOp;
+
+        auto startOrig = chrono::high_resolution_clock::now();
+        int orig = op;// range_count(permutation, a, b, L, U);
+        auto endOrig = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedOrig = endOrig - startOrig;
+
+        if (orig != op) {
+            int k;
+            std::cout << "WRONG OUTPUT" << std::endl;
+            cin >> k;
+            return;
+        }
+
+        origTime = origTime * (sampleCount / (sampleCount + 1.0f)) + elapsedOrig.count() / (sampleCount + 1);
+        opTime = opTime * (sampleCount / (sampleCount + 1.0f)) + elapsedOp.count() / (sampleCount + 1);
+
+        if (verbose && sampleCount % 1000 == 0) {
+            std::cout << "With " << sampleCount << " samples, the original time is " << origTime << " and the optimized time is " << opTime << std::endl;
+            std::cout << "The update time is about " << avgSwitchSpeed << std::endl;
+            std::cout << "The speed improvement is about " << origTime / (opTime + avgSwitchSpeed)  << " times" << std::endl;
+        }
+
+        int changeIndex1 = 0;
+        int changeIndex2 = 0;
+        while (changeIndex1 == changeIndex2) {
+            uniform_int_distribution<ui32> dist(0, n - 1);
+            changeIndex1 = dist(rng);
+            changeIndex2 = dist(rng);
+        }
+
+        //std::cout << "Changing index " << changeIndex1 << " and " << changeIndex2 << "!" << std::endl;
+
+        ui32 val1 = permutation[changeIndex1];
+        ui32 val2 = permutation[changeIndex2];
+
+        auto startSwitch = std::chrono::high_resolution_clock::now();
+        wt.set_value(changeIndex1, val2);
+        wt.set_value(changeIndex2, val1);
+        auto endSwitch = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedSwitch = endSwitch - startSwitch;
+
+        permutation[changeIndex2] = val1;
+        permutation[changeIndex1] = val2;
+
+        avgSwitchSpeed = avgSwitchSpeed * (sampleCount / (sampleCount + 1.0f)) + elapsedSwitch.count() / (sampleCount + 1);
+    }
+
+    *update = avgSwitchSpeed;
+    *op = opTime;
+    *orig = origTime;
+
+    wt.clear();
+}
+
+
+
+void WaveletTreeSpeedTable() {
+    // B      = 64 96 128 192 256 384 512 768 1024 2048 1536 2048
+    // minsze = 64 96 128 192 256 384 512 768 1024 2048 1536 2048
+    // n      = 100000, 1000000, 10000000, 100000000
+
+    ui32 sizes[] = { 64, 96 ,128 ,192 ,256 ,384 ,512 ,768 ,1024 ,2048, 3072, 4096, };
+    ui32 sizes_count = 12;
+    ui32 ns[4] = { 10000000, 1000000, 1000000, 1000000 };
+    ui32 *permutations[4];
+    bool verboses[] = { true, true, true, true };
+    ui32 ns_count = 4;
+
+
+    vector<vector<vector<float>>> updates(ns_count);
+    vector<vector<vector<float>>> origs(ns_count);
+    vector<vector<vector<float>>> ops(ns_count);
+
+    for (ui32 i = 0; i < ns_count; i++) {
+        updates[i] = vector<vector<float>>(sizes_count);
+        origs[i] = vector<vector<float>>(sizes_count);
+        ops[i] = vector<vector<float>>(sizes_count);
+        for (ui32 j = 0; j < sizes_count; j++) {
+            updates[i][j] = vector<float>(sizes_count);
+            origs[i][j] = vector<float>(sizes_count);
+            ops[i][j] = vector<float>(sizes_count);
+        }
+    }
+    float update, op, orig;
+
+    std::minstd_rand rng(_RANDOM_SEED);
+
+    for (ui32 i = 0; i < ns_count; i++) {
+        FenwickTree ft(ns[i]);
+        ft.init(ns[i]);
+        ui32 *permutation = new ui32[ns[i]];
+        cout << "Creating the permutation of size " << ns[i] << endl;
+        for (int j = 0; j < ns[i]; j++) {
+                uniform_int_distribution<ui32> dist(1, ns[i] - j);
+                permutation[j] = ft.removeIth(dist(rng)) - 1;
+        }
+        permutations[i] = permutation;
+    }
+
+    WaveletTreeSpeedTest<1024, 64>(permutations[0], sizes[8], ns[0], 200000000, &update, &op, &orig, true);
+    return;
+
+
+#define WAVELET_TEST(BITS, INDEX) \
+    for (ui32 i = 0; i < ns_count; i++) { \
+        for (ui32 j = 0; j < sizes_count; j++) { \
+            cout << "Start bits=" << BITS << ". min_sz=" << sizes[j] << ", n=" << ns[i] << endl; \
+            WaveletTreeSpeedTest<BITS, 64>(permutations[i], sizes[j], ns[i], 100000000, &update, &op, &orig, verboses[i]); \
+            cout << "Finished!" << endl; \
+            updates[i][INDEX][j] = update; \
+            origs[i][INDEX][j] = orig; \
+            ops[i][INDEX][j] = op; \
+        } \
+    }
+
+
+
+    WAVELET_TEST(64, 0);
+
+    WAVELET_TEST(96, 1);
+
+    WAVELET_TEST(128, 2);
+
+    WAVELET_TEST(192, 3);
+
+    WAVELET_TEST(256, 4);
+
+    WAVELET_TEST(384, 5);
+
+    WAVELET_TEST(512, 6);
+
+    WAVELET_TEST(768, 7);
+
+    WAVELET_TEST(1024, 8);
+
+    WAVELET_TEST(2048, 9);
+
+    WAVELET_TEST(1536, 10);
+
+    WAVELET_TEST(2048, 11);
+
+    for (ui32 i = 0; i < ns_count; i++) {
+        delete[] permutations[i];
+    }
+
+    for (ui32 i = 0; i < ns_count; i++) {
+        cout << "------------- size=" << ns[i] << " separation--------------" << endl;
+        cout << endl;
+        cout << "Printing update time, horizontal for min size, vertical for bits:" << endl;
+        cout << "  \t";
+        for (ui32 j = 0; j < sizes_count; j++)
+            cout << sizes[j] << "\t";
+        cout << endl;
+        for (ui32 j = 0; j < sizes_count; j++) {
+            cout << sizes[j] << "\t";
+            for (ui32 k = 0; k < sizes_count; k++) {
+                cout << updates[i][j][k] << "\t";
+            }
+            cout << endl;
+        }
+
+        cout << endl;
+        cout << "Printing optimized time, horizontal for min size, vertical for bits:" << endl;
+        cout << "  \t";
+        for (ui32 j = 0; j < sizes_count; j++)
+            cout << sizes[j] << "\t";
+        cout << endl;
+        for (ui32 j = 0; j < sizes_count; j++) {
+            cout << sizes[j] << "\t";
+            for (ui32 k = 0; k < sizes_count; k++) {
+                cout << ops[i][j][k] << "\t";
+            }
+            cout << endl;
+        }
+
+        cout << endl;
+        cout << "Printing original time, horizontal for min size, vertical for bits:" << endl;
+        cout << "  \t";
+        for (ui32 j = 0; j < sizes_count; j++)
+            cout << sizes[j] << "\t";
+        cout << endl;
+        for (ui32 j = 0; j < sizes_count; j++) {
+            cout << sizes[j] << "\t";
+            for (ui32 k = 0; k < sizes_count; k++) {
+                cout << origs[i][j][k] << "\t";
+            }
+            cout << endl;
+        }
+        cout << "------------- size=" << ns[i] << " separation--------------" << endl;
+        cout << endl << endl;
+    }
+    return;
+}
+
 void WaveletTreeTest() {
+
     int n = 1000000;
     
     FenwickTree ft(n);
     ft.init(n);
 
-    std::minstd_rand rng(_RANDOM_SEED);
+    std::minstd_rand rng(13613);
 
     ui32 *permutation = new ui32[n];
 
@@ -1276,12 +1725,12 @@ void WaveletTreeTest() {
 
 
 
-    WaveletTree<ui32, 256> wt;
+    WaveletTree<ui32, 64, 1024> wt;
     wt.set_alph_size(n);
-    wt.set_max_depth_leaf(n, 100);
+    wt.set_max_depth_leaf(n, 1024);
     wt.reserve(n, 2);
 
-    wt.create_array(permutation, n);
+    wt.create_array(permutation, n, true);
 
 
     //WaveletTree<ui32, 64> wt2;
@@ -1290,107 +1739,92 @@ void WaveletTreeTest() {
     //wt2.reserve(n, 2);
     //wt2.orig_create(permutation, n);
 
+    float opTime = 0;
+    float origTime = 0;
+    int sampleCount = 0;
+    float avgSwitchSpeed = 0;
+
+
     while (true) {
-        float opTime = 0;
-        float origTime = 0;
-        int sampleCount = 0;
-        int sampleCountTotal = 3;
 
-        for (int _ = 0; _ < sampleCountTotal; _++) {
+        uniform_int_distribution<int> distL(0, n - 1);
+        uniform_int_distribution<int> distU(0, n);
+        int L = distL(rng);
+        int U = distU(rng);
 
-            uniform_int_distribution<int> distL(0, n - 1);
-            uniform_int_distribution<int> distU(0, n);
-            int L = distL(rng);
-            int U = distU(rng);
-
-            if (L > U) {
-                int temp = L;
-                L = U;
-                U = temp;
-            }
-
-            int a = 0, b = 0;
-
-            while (a == b) {
-                a = distL(rng);
-                b = distU(rng);
-
-                if (a > b) {
-                    int temp = b;
-                    b = a;
-                    a = temp;
-                }
-            }
-
-            auto startOrig = chrono::high_resolution_clock::now();
-            int orig = range_count(permutation, a, b, L, U);
-            auto endOrig = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<float> elapsedOrig = endOrig - startOrig;
-
-            if (L == 31158) {
-                int oaihwga = 0;
-            }
-            auto startOp = chrono::high_resolution_clock::now();
-            int op = wt.range(a, b, L, U);
-            auto endOp = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<float> elapsedOp = endOp - startOp;
-
-            if (orig != op) {
-                int k;
-                std::cout << "WRONG OUTPUT" << std::endl;
-                cin >> k;
-                return;
-            }
-
-            origTime = origTime * (_ / (_ + 1.0f)) + elapsedOrig.count() / (_ + 1);
-            opTime = opTime * (_ / (_ + 1.0f)) + elapsedOp.count() / (_ + 1);
+        if (L > U) {
+            int temp = L;
+            L = U;
+            U = temp;
         }
 
-        std::cout << "With " << sampleCountTotal << " samples, the original time is " << origTime << " and the optimized time is " << opTime << std::endl;
-        std::cout << "The speed improvement is about " << origTime / opTime << " times" << std::endl;
+        int a = 0, b = 0;
 
-        //int changeIndex1 = 0;
-        //int changeIndex2 = 0;
-        //while (changeIndex1 == changeIndex2) {
-        //
-        //    changeIndex1 = device.UniformN(0, Num - 1);
-        //    changeIndex2 = device.UniformN(0, Num - 1);
-        //}
-        //
+        while (a == b) {
+            a = distL(rng);
+            b = distU(rng);
+
+            if (a > b) {
+                int temp = b;
+                b = a;
+                a = temp;
+            }   
+        }
+
+
+        auto startOp = chrono::high_resolution_clock::now();
+        int op = wt.range(a, b, L, U);
+        auto endOp = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedOp = endOp - startOp;
+
+        auto startOrig = chrono::high_resolution_clock::now();
+        int orig = op;// range_count(permutation, a, b, L, U);
+        auto endOrig = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedOrig = endOrig - startOrig;
+
+
+        if (orig != op) {
+            int k;
+            std::cout << "WRONG OUTPUT" << std::endl;
+            cin >> k;
+            return;
+        }
+
+        origTime = origTime * (sampleCount / (sampleCount + 1.0f)) + elapsedOrig.count() / (sampleCount + 1);
+        opTime = opTime * (sampleCount / (sampleCount + 1.0f)) + elapsedOp.count() / (sampleCount + 1);
+
+
+        int changeIndex1 = 0;
+        int changeIndex2 = 0;
+        while (changeIndex1 == changeIndex2) {
+            uniform_int_distribution<ui32> dist(0, n - 1);
+            changeIndex1 = dist(rng);
+            changeIndex2 = dist(rng);
+        }
+        
         //std::cout << "Changing index " << changeIndex1 << " and " << changeIndex2 << "!" << std::endl;
-        //
-        //if (changeIndex2 == 292) {
-        //    int k = 0;
-        //}
-        //
-        //if (changeIndex2 == 145) {
-        //    int k = 0;
-        //}
-        //
-        //auto startSwitch = std::chrono::high_resolution_clock::now();
-        //tree->Switch(changeIndex1, changeIndex2);
-        //auto endSwitch = std::chrono::high_resolution_clock::now();
-        //std::chrono::duration<float> elapsedSwitch = endSwitch - startSwitch;
-        //
-        //avgSwitchSpeed = avgSwitchSpeed * (numTrials / (numTrials + 1.0f)) + elapsedSwitch.count() / (numTrials + 1);
-        //avgOpSpeed = avgOpSpeed * (numTrials / (numTrials + 1.0f)) + opTime / (numTrials + 1);
-        //avgOrigSpeed = avgOrigSpeed * (numTrials / (numTrials + 1.0f)) + origTime / (numTrials + 1);
-        //
-        //numTrials++;
-        //
-        //if (numTrials % 1000 == 0) {
-        //    cout << endl;
-        //    cout << "running average switching speed: " << avgSwitchSpeed << endl;
-        //    cout << "running average original speed:  " << avgOrigSpeed << endl;
-        //    cout << "running average optimized speed: " << avgOpSpeed << endl;
-        //    int k;
-        //    cin >> k;
-        //}
-        //
-        //
-        //
-        //nextSeed = device.UniformN(1, 100000000);
-        //RandDevice::DeleteDevice(device);
+        
+        ui32 val1 = permutation[changeIndex1];
+        ui32 val2 = permutation[changeIndex2];
+        
+        auto startSwitch = std::chrono::high_resolution_clock::now();
+        wt.set_value(changeIndex1, val2);
+        wt.set_value(changeIndex2, val1);
+        auto endSwitch = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedSwitch = endSwitch - startSwitch;
+        
+        permutation[changeIndex2] = val1;
+        permutation[changeIndex1] = val2;
+        
+        avgSwitchSpeed = avgSwitchSpeed * (sampleCount / (sampleCount + 1.0f)) + elapsedSwitch.count() / (sampleCount + 1);
+
+        sampleCount++;
+
+
+        if (sampleCount % 1000 == 0) {
+            std::cout << "With " << sampleCount << " samples, orig time " << origTime << ", op time " << opTime << ", switch time " << avgSwitchSpeed << std::endl;
+            std::cout << "The speed improvement is about " << origTime / (opTime + avgSwitchSpeed) << " times" << std::endl;
+        }
     }
 
 
@@ -1401,5 +1835,7 @@ void GeneralTest()
 {
     //DatablockTest();
     //DynamicBitvectorTest();
+    //DynamicBitvectorBTest();
     WaveletTreeTest();
+    //WaveletTreeSpeedTable();
 }

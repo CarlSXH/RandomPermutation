@@ -91,7 +91,7 @@ public:
         if (!valid_pos(pos))
             throw std::out_of_range("");
 #endif
-
+        
         const ui32 w = block_index(pos);
         const ui32 b = bit_index(pos);
         return (data[w] >> b) & 1U;

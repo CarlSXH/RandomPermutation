@@ -36,9 +36,6 @@
     <ClCompile Include="Testing.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="WaveletTree.cpp">
-      <Filter>Data structures</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="RandPerm.h">
@@ -63,6 +60,15 @@
       <Filter>Data structures</Filter>
     </ClInclude>
     <ClInclude Include="WaveletTree.h">
+      <Filter>Data structures</Filter>
+    </ClInclude>
+    <ClInclude Include="DynamicBitvectorBTree.h">
+      <Filter>Data structures</Filter>
+    </ClInclude>
+    <ClInclude Include="ContiguousAllocator.h">
+      <Filter>Data structures</Filter>
+    </ClInclude>
+    <ClInclude Include="utils.h">
       <Filter>Data structures</Filter>
     </ClInclude>
   </ItemGroup>
