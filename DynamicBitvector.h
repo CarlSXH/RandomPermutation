@@ -6,8 +6,10 @@
 #include <random>
 #include <vector>
 #include <cstdint>
-#include "Datablock.h"
 #include <iostream>
+
+#include "utils.h"
+#include "Datablock.h"
 
 
 using ui32 = uint32_t;
@@ -87,8 +89,10 @@ public:
 private:
     static constexpr ui32 idx_null = UINT32_MAX;
 
-    static constexpr ui32 MAX_BITS = (4 * B + 2) / 3;       // this is ceil( 4B/3 )
-    static constexpr ui32 MIN_BITS = (2 * B) / 3;           // this is floor( 2B/3 )
+    //static constexpr ui32 MAX_BITS = (4 * B + 2) / 3;       // this is ceil( 4B/3 )
+    //static constexpr ui32 MIN_BITS = (2 * B) / 3;           // this is floor( 2B/3 )
+    static constexpr ui32 MAX_BITS = 2 * B;
+    static constexpr ui32 MIN_BITS = B / 2;
     static constexpr ui32 MAX_WORDS = (MAX_BITS + 63) / 64; // ceil(MAX_BITS / 64)
     static constexpr ui32 MIN_WORDS = (MIN_BITS + 63) / 64; // ceil(MIN_BITS / 64)
 
@@ -122,6 +126,9 @@ private:
     // Random number generator for treap.
     std::minstd_rand rng;
 
+    // Actual uniform distribution generator
+    std::uniform_int_distribution<ui32> dist;
+
     // Allocate a new node by recycling or adjusting the vector
     ui32 alloc_node() {
         ui32 idx;
@@ -134,7 +141,6 @@ private:
         }
         Node &n = nodes[idx];
         n = Node();
-        std::uniform_int_distribution<ui32> dist(0, UINT32_MAX);
         n.prio = dist(rng);
         return idx;
     }
@@ -378,9 +384,10 @@ private:
     // out_pos_loc is a return value for the local index
     // of the bit inside this node.
     ui32 bisect_pos(ui32 pos, ui32 *out_pos_loc) const {
+#if defined(_BOUND_CHECKING)
         if (pos >= size())
             throw std::out_of_range("");
-
+#endif
         ui32 idx = root;
 
         while (true) {
@@ -410,9 +417,10 @@ private:
     // out_ones is the number of ones before this index
     // in the entire array.
     ui32 bisect_pos(ui32 pos, ui32 *out_pos_loc, ui32 *out_ones) const {
+#if defined(_BOUND_CHECKING)
         if (pos >= size())
             throw std::out_of_range("");
-
+#endif
         ui32 idx = root;
         ui32 ones = 0;
         while (true) {
@@ -459,8 +467,10 @@ private:
 
     // Bisection on the number of ones
     ui32 bisect_ones(ui32 pos, ui32 *pos_loc, ui32 *pos_before) const {
+#if defined(_BOUND_CHECKING)
         if (root == idx_null || nodes[root].sub_ones >= pos)
             throw std::out_of_range("");
+#endif
 
         ui32 idx = root;
         ui32 count = 0;
@@ -489,7 +499,7 @@ private:
     }
 
 public:
-    DynamicBitvector() : root(idx_null), rng() {};
+    DynamicBitvector() : root(idx_null), rng(std::random_device()()), dist(0, UINT32_MAX) {};
     ~DynamicBitvector() {};
 
     void reserve(ui32 bits_sz) {
@@ -499,28 +509,48 @@ public:
     }
 
     void init_size(ui32 sz) {
-        ui32 node_count = sz / B;
+        ui32 k_max = sz / MIN_BITS;
+        ui32 k_min = (sz + (MAX_BITS - 1)) / MAX_BITS;
+        ui32 k = sz / B;
 
-        if (node_count <= 0) {
-            ui32 idx = alloc_node();
-            nodes[idx].bits.expand(sz);
-            nodes[idx].sub_sz = sz;
-            root = idx;
+        if (k_max < k_min || k_max <= 0) {
+            ui32 prev = idx_null;
+            for (; sz >= B; sz -= B) {
+                ui32 idx = alloc_node();
+                nodes[idx].bits.expand(B);
+                nodes[idx].sub_sz = B;
+                root = insert_max(root, idx);
+                if (prev != idx_null)
+                    ll_insert_after(prev, idx);
+                prev = idx;
+            }
+            if (sz > 0) {
+                ui32 idx = alloc_node();
+                nodes[idx].bits.expand(sz);
+                nodes[idx].sub_sz = sz;
+                root = insert_max(root, idx);
+                if (prev != idx_null)
+                    ll_insert_after(prev, idx);
+            }
             return;
         }
+        if (k > k_max)
+            k = k_max;
+        if (k < k_min)
+            k = k_min;
 
-        ui32 node_remaining = sz - node_count * B;
-        ui32 node_plus_one = node_remaining % node_count;
-        ui32 node_const_shift = node_remaining / node_count;
+        ui32 node_sz = sz / k;
+        ui32 node_ones = sz % k;
+
         ui32 prev = idx_null;
-        for (ui32 i = 0; i < node_count; i++) {
+        for (ui32 i = 0; i < k; i++) {
             ui32 idx = alloc_node();
-            if (i < node_plus_one) {
-                nodes[idx].bits.expand(B + node_const_shift + 1);
-                nodes[idx].sub_sz = B + node_const_shift + 1;
+            if (i < node_ones) {
+                nodes[idx].bits.expand(node_sz + 1);
+                nodes[idx].sub_sz = node_sz + 1;
             } else {
-                nodes[idx].bits.expand(B + node_const_shift);
-                nodes[idx].sub_sz = B + node_const_shift;
+                nodes[idx].bits.expand(node_sz);
+                nodes[idx].sub_sz = node_sz;
             }
             root = insert_max(root, idx);
             if (prev != idx_null)
@@ -539,18 +569,30 @@ public:
 
     // access bit
     bool get_bit(ui32 pos) const {
+#if defined(_BOUND_CHECKING)
         if (pos >= size())
             throw std::out_of_range("get: pos out of range");
-
+#endif
         ui32 pos_loc;
         ui32 idx = bisect_pos(pos, &pos_loc);
         return nodes[idx].bits.get_bit(pos_loc);
     }
 
-    void set_bit(ui32 pos, bool bit) {
+    bool get_bit_rank(ui32 pos, ui32 *rank1) const {
+#if defined(_BOUND_CHECKING)
         if (pos >= size())
             throw std::out_of_range("get: pos out of range");
+#endif
+        ui32 pos_loc;
+        ui32 idx = bisect_pos(pos, &pos_loc, rank1);
+        return nodes[idx].bits.get_bit(pos_loc);
+    }
 
+    void set_bit(ui32 pos, bool bit) {
+#if defined(_BOUND_CHECKING)
+        if (pos >= size())
+            throw std::out_of_range("get: pos out of range");
+#endif
         ui32 pos_loc;
         ui32 idx = bisect_pos(pos, &pos_loc);
 
@@ -764,6 +806,7 @@ public:
         // This happens when the tree is just a single node,
         // so we are going to just delete it.
         nodes[idx].bits.remove_at(pos);
+        pull_propagate(idx);
     }
 
     void print() const {
