@@ -49,9 +49,9 @@ public:
         struct NodeStats {
             ui32 idx, sz, ones;
         };
+        ui32 sz_child;
         NodeStats children[B];
 
-        ui32 sz_child;
 
         NodePayload() : sz_child(0) {};
 

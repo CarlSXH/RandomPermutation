@@ -18,6 +18,105 @@
 #include "WaveletTree.h"
 #include "DynamicBitvectorBTree.h"
 
+
+
+#include <algorithm>
+#include <vector>
+#include <iostream>
+#include <cstddef>
+#include <cstdint>
+#include <cmath>
+
+using namespace std;
+
+typedef int32_t ll;
+class RangeCount {
+private:
+    size_t n;
+    size_t b_size;
+    vector<ll> A;
+    vector<vector<ll>> blocks;
+    size_t num_blocks;
+
+    void update_block(size_t bk, ll remove_val, ll insert_val) {
+        auto &v = blocks[bk];
+        // Remove one occurrence of remove_val
+        auto it_rem = lower_bound(v.begin(), v.end(), remove_val);
+        if (it_rem != v.end() && *it_rem == remove_val) {
+            v.erase(it_rem);
+        }
+        // Insert insert_val
+        auto it_ins = lower_bound(v.begin(), v.end(), insert_val);
+        v.insert(it_ins, insert_val);
+    }
+
+public:
+    RangeCount(const vector<ll> &arr) : n(arr.size()), A(arr) {
+        double sqrt_n = sqrt(static_cast<double>(n));
+        b_size = static_cast<size_t>(sqrt_n * 5.0); // Increased multiplier for larger n, balances queries and updates
+        if (b_size < 1) b_size = 1;
+        if (b_size > n) b_size = n;
+        num_blocks = (n + b_size - 1) / b_size;
+        blocks.resize(num_blocks);
+        for (size_t i = 0; i < n; ++i) {
+            size_t bk = i / b_size;
+            blocks[bk].push_back(A[i]);
+        }
+        for (auto &v : blocks) {
+            sort(v.begin(), v.end());
+        }
+    }
+
+    void swap_vals(size_t p, size_t q) {
+        if (p >= n || q >= n || p == q) return;
+        ll old_p = A[p];
+        ll old_q = A[q];
+        A[p] = old_q;
+        A[q] = old_p;
+        size_t bp = p / b_size;
+        size_t bq = q / b_size;
+        if (bp == bq) return;
+        update_block(bp, old_p, old_q);
+        update_block(bq, old_q, old_p);
+    }
+
+    ll query(size_t L, size_t R, ll a, ll b_val) {
+        if (L >= R || L >= n || R > n) return 0;
+        ll cnt = 0;
+        size_t start_bk = L / b_size;
+        size_t end_bk = (R - 1) / b_size;
+        if (start_bk == end_bk) {
+            // Brute force single block
+            for (size_t i = L; i < R; ++i) {
+                if (a <= A[i] && A[i] < b_val) ++cnt;
+            }
+            return cnt;
+        }
+        // Left partial block
+        size_t end_left = min(n, (start_bk + 1) * b_size);
+        for (size_t i = L; i < end_left; ++i) {
+            if (a <= A[i] && A[i] < b_val) ++cnt;
+        }
+        // Right partial block
+        size_t start_right = end_bk * b_size;
+        for (size_t i = start_right; i < R; ++i) {
+            if (a <= A[i] && A[i] < b_val) ++cnt;
+        }
+        // Full blocks
+        for (size_t bk = start_bk + 1; bk < end_bk; ++bk) {
+            auto &v = blocks[bk];
+            auto it_low = lower_bound(v.begin(), v.end(), a);
+            auto it_up = lower_bound(it_low, v.end(), b_val);
+            cnt += static_cast<ll>(it_up - it_low);
+        }
+        return cnt;
+    }
+};
+
+
+
+
+
 using namespace std;
 
 // 1825102
@@ -1457,6 +1556,122 @@ ui32 range_count(const ui32 *permutation, ui32 pos_l, ui32 pos_r, ui32 L, ui32 U
     return count;
 }
 
+
+void SqrtTest() {
+
+    int n = 100000000;
+
+    FenwickTree ft(n);
+    ft.init(n);
+
+    std::minstd_rand rng(13613);
+
+    ui32 *permutation = new ui32[n];
+
+    for (int i = 0; i < n; i++) {
+        uniform_int_distribution<ui32> dist(1, n - i);
+        permutation[i] = ft.removeIth(dist(rng)) - 1;
+        if (i % 50000 == 0)
+            cout << i << " th element inserted" << endl;
+    }
+
+    vector<ll> perm(permutation, permutation + n);
+    RangeCount rc(perm);
+
+
+    float opTime = 0;
+    float origTime = 0;
+    int sampleCount = 0;
+    float avgSwitchSpeed = 0;
+
+
+    while (true) {
+
+        uniform_int_distribution<int> distL(0, n - 1);
+        uniform_int_distribution<int> distU(0, n);
+        int L = distL(rng);
+        int U = distU(rng);
+
+        if (L > U) {
+            int temp = L;
+            L = U;
+            U = temp;
+        }
+
+        int a = 0, b = 0;
+
+        while (a == b) {
+            a = distL(rng);
+            b = distU(rng);
+
+            if (a > b) {
+                int temp = b;
+                b = a;
+                a = temp;
+            }
+        }
+
+
+        auto startOp = chrono::high_resolution_clock::now();
+        int op = rc.query(a, b, L, U);
+        auto endOp = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedOp = endOp - startOp;
+
+        auto startOrig = chrono::high_resolution_clock::now();
+        int orig = range_count(permutation, a, b, L, U);
+        auto endOrig = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedOrig = endOrig - startOrig;
+
+
+        if (orig != op) {
+            int k;
+            std::cout << "WRONG OUTPUT" << std::endl;
+            cin >> k;
+            return;
+        }
+
+        origTime = origTime * (sampleCount / (sampleCount + 1.0f)) + elapsedOrig.count() / (sampleCount + 1);
+        opTime = opTime * (sampleCount / (sampleCount + 1.0f)) + elapsedOp.count() / (sampleCount + 1);
+
+
+        int changeIndex1 = 0;
+        int changeIndex2 = 0;
+        while (changeIndex1 == changeIndex2) {
+            uniform_int_distribution<ui32> dist(0, n - 1);
+            changeIndex1 = dist(rng);
+            changeIndex2 = dist(rng);
+        }
+
+        //std::cout << "Changing index " << changeIndex1 << " and " << changeIndex2 << "!" << std::endl;
+
+        ui32 val1 = permutation[changeIndex1];
+        ui32 val2 = permutation[changeIndex2];
+
+        auto startSwitch = std::chrono::high_resolution_clock::now();
+        rc.swap_vals(changeIndex1, changeIndex2);
+        auto endSwitch = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> elapsedSwitch = endSwitch - startSwitch;
+
+        permutation[changeIndex2] = val1;
+        permutation[changeIndex1] = val2;
+
+        avgSwitchSpeed = avgSwitchSpeed * (sampleCount / (sampleCount + 1.0f)) + elapsedSwitch.count() / (sampleCount + 1);
+
+        sampleCount++;
+
+
+        if (sampleCount % 100 == 0) {
+            std::cout << "With " << sampleCount << " samples, orig time " << origTime << ", op time " << opTime << ", switch time " << avgSwitchSpeed << std::endl;
+            std::cout << "The speed improvement is about " << origTime / (opTime + avgSwitchSpeed) << " times" << std::endl;
+        }
+    }
+
+
+    int laoiwgw = 0;
+}
+
+
+
 template<ui32 LeafBits, ui32 B>
 void WaveletTreeSpeedTest(ui32 *permutation, ui32 min_size, ui32 n, ui32 iteration, float *update, float *op, float *orig, bool verbose = false) {
 
@@ -1707,7 +1922,7 @@ void WaveletTreeSpeedTable() {
 
 void WaveletTreeTest() {
 
-    int n = 1000000;
+    int n = 100000000;
     
     FenwickTree ft(n);
     ft.init(n);
@@ -1719,13 +1934,14 @@ void WaveletTreeTest() {
     for (int i = 0; i < n; i++) {
         uniform_int_distribution<ui32> dist(1, n - i);
         permutation[i] = ft.removeIth(dist(rng)) - 1;
-        //if (i <= 56)
-        //    cout << permutation[i] << " ";
+        if (i % 50000 == 0)
+            cout << i << " th element inserted" << endl;
     }
 
 
 
-    WaveletTree<ui32, 64, 1024> wt;
+    WaveletTree<ui32, 64, 2048> wt;
+
     wt.set_alph_size(n);
     wt.set_max_depth_leaf(n, 1024);
     wt.reserve(n, 2);

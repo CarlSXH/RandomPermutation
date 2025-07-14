@@ -8,6 +8,7 @@
 
 using ui32 = uint32_t;
 
+#define __USE_PREFIX__
 
 
 // This class represents a collection of 64*W bits.
@@ -25,6 +26,52 @@ struct Datablock {
     // smaller indices will come before the blocks with
     // larger indices.
     uint64_t data[W];
+
+
+    struct FenwickTree {
+        ui32 bit[W];
+        uint8_t vals[W];
+        FenwickTree() { for (ui32 i = 0; i < W; i++)bit[i] = 0; };
+
+        ~FenwickTree() {};
+
+        void update_delta(int idx, int delta) {
+            vals[idx] += delta;
+            idx++;
+            while (idx <= W) {
+                bit[idx-1] += delta;
+                idx += idx & -idx;
+            }
+        }
+        void set(int idx, int val) {
+            update_delta(idx, val - vals[idx]);
+        }
+
+        ui32 sum(int idx) const {
+            ui32 res = 0;
+            while (idx > 0) {
+                res += bit[idx-1];
+                idx -= idx & -idx;
+            }
+            return res;
+        }
+
+        inline uint8_t &operator[](ui32 i) {
+            return vals[i];
+        }
+        inline const uint8_t &operator[](ui32 i) const {
+            return vals[i];
+        }
+    };
+
+    FenwickTree sums;
+
+
+#define update_sums(i)  sums.set(i,popcount64(data[i]))
+#define zero_sums(i) sums.set(i, 0)
+#define increment_sums(i,delta) sums.update_delta(i, delta)
+#define set_sums(i, val) sums.set(i, val)
+
 
     Datablock() : sz(0), ones(0) {
         std::fill(data, data + W, 0ULL);
@@ -112,9 +159,13 @@ public:
         if (bit) {
             ones++;
             data[w] |= EXP_MASK[b];
+#ifdef __USE_PREFIX__
+            increment_sums(w, 1);
+#endif
         } else {
             ones--;
             data[w] &= EXP_MASK_F[b];
+            increment_sums(w, -1);
         }
     }
     inline bool test_set_bit(ui32 pos, ui32 bit) {
@@ -131,9 +182,11 @@ public:
         if (bit) {
             ones++;
             data[w] |= EXP_MASK[b];
+            increment_sums(w, 1);
         } else {
             ones--;
             data[w] &= EXP_MASK_F[b];
+            increment_sums(w, -1);
         }
         return true;
     }
@@ -183,11 +236,13 @@ public:
 #endif
         const ui32 w = block_index(pos);
         const ui32 b = bit_index(pos);
-        ones += popcount64(bits);
+        const ui32 bits_ones = popcount64(bits);
+        ones += bits_ones;
 
         if (b == 0) {
             ones -= popcount64(data[w]);
             data[w] = bits;
+            set_sums(w, bits_ones);
             return;
         }
         const uint64_t ffm = LOW_MASK[b]; // mask for the fixed bits of data[w]
@@ -200,7 +255,8 @@ public:
 
         data[w] = (data[w] & ffm) | (bits << b);
         data[w + 1] = (data[w + 1] & bfm) | (bits >> (64 - b));
-
+        update_sums(w);
+        update_sums(w + 1);
     }
     // Set the next 64 bits at the pos'th bit in this stream
     // without updating the number of ones
@@ -220,6 +276,8 @@ public:
         const uint64_t bfm = LOW_MASK_F[b]; // mask for the fixed bits of data[w+1]
         data[w] = (data[w] & ffm) | (bits << b);
         data[w + 1] = (data[w + 1] & bfm) | (bits >> (64 - b));
+        update_sums(w);
+        update_sums(w + 1);
     }
 
     // Return the next s bits at the pos'th bit in this stream.
@@ -268,6 +326,7 @@ public:
             const uint64_t fm = ~(LOW_MASK[s] << b); // mask for the fixed bits
             uint64_t old = data[w] & (~fm);
             data[w] = (data[w] & fm) | (masked_bits << b);
+            update_sums(w);
             ones -= popcount64(old);
             return;
         }
@@ -283,6 +342,8 @@ public:
 
         data[w] = (data[w] & ffm) | (masked_bits << b);
         data[w + 1] = (data[w + 1] & bfm) | (masked_bits >> (64 - b));
+        update_sums(w);
+        update_sums(w + 1);
     }
     // Set the next s <= 64 bits at the pos'th bit in this stream
     // without updating the number of ones
@@ -304,6 +365,7 @@ public:
         if (b + s <= 64) {
             const uint64_t fm = ~(LOW_MASK[s] << b); // mask for the fixed bits
             data[w] = (data[w] & fm) | (masked_bits << b);
+            update_sums(w);
             return;
         }
 
@@ -312,6 +374,8 @@ public:
         const uint64_t bfm = LOW_MASK_F[size_back]; // mask for the fixed bits of data[w+1]
         data[w] = (data[w] & ffm) | (masked_bits << b);
         data[w + 1] = (data[w + 1] & bfm) | (masked_bits >> (64 - b));
+        update_sums(w);
+        update_sums(w + 1);
     }
 
     // Expand the current stream by s bits and pad the end with 0's.
@@ -329,15 +393,20 @@ public:
         if (start_w == end_w) {
             uint64_t fm = LOW_MASK[start_b];
             data[start_w] = data[start_w] & fm;
+            update_sums(start_w);
             return;
         }
 
         data[start_w] = data[start_w] & LOW_MASK[start_b];
-        for (ui32 i = start_w + 1; i < end_w; i++)
+        for (ui32 i = start_w + 1; i < end_w; i++) {
             data[i] = 0ULL;
+            zero_sums(i);
+        }
         // we don't care about what's afterwards anyways
-        if (end_b > 0)
+        if (end_b > 0) {
             data[end_w] = 0;
+            zero_sums(end_w);
+        }
     }
     // Remove the last s bits in the current stream and update
     // the number of ones.
@@ -427,8 +496,10 @@ public:
         const ui32 b = bit_index(s);
         ui32 count = 0;
 
-        for (ui32 i = 0; i < w; i++)
-            count += popcount64(data[i]);
+        count = sums.sum(w);
+
+        //for (ui32 i = 0; i < w; i++)
+        //    count += sums[i];// popcount64(data[i]);
         if (b > 0)
             count += popcount64(data[w] & LOW_MASK[b]);
 
@@ -480,8 +551,10 @@ public:
             for (ui32 i = end_w - 1; i > w; i--) {
                 data[i + 1] = data[i + 1] | (data[i] >> 63);
                 data[i] = data[i] << 1;
+                update_sums(i + 1);
             }
             data[w + 1] = data[w + 1] | (data[w] >> 63);
+            update_sums(w + 1);
         }
 
         // inserting the bit in the block containing the pos'th bit
@@ -496,6 +569,7 @@ public:
             data[w] = data[w] | EXP_MASK[b];
             ones++;
         }
+        update_sums(w);
         sz++;
     }
     // Remove the pos'th bit in the stream and update the number
@@ -527,7 +601,9 @@ public:
         for (ui32 i = w + 1; i <= block_index(sz - 1); i++) {
             data[i - 1] = data[i - 1] | ((data[i] & 1ULL) << 63);
             data[i] = data[i] >> 1;
+            update_sums(i - 1);
         }
+        update_sums(block_index(sz - 1));
         sz--;
     }
     // Insert the bit in the pos'th position in the stream without
@@ -541,18 +617,22 @@ public:
         const ui32 w = block_index(pos);
         const ui32 b = bit_index(pos);
 
-        const ui32 end_w = block_index(sz);
+        ui32 end_w = block_index(sz);
         const ui32 end_b = bit_index(sz);
 
         if (end_w > w) {
-            if (end_b > 0)
+            if (end_b > 0) {
                 data[end_w] = data[end_w] << 1;
+                update_sums(end_w);
+            }
 
             for (ui32 i = end_w - 1; i > w; i--) {
                 data[i + 1] = data[i + 1] | (data[i] >> 63);
                 data[i] = data[i] << 1;
+                update_sums(i + 1);
             }
             data[w + 1] = data[w + 1] | (data[w] >> 63);
+            update_sums(w + 1);
         }
 
         // inserting the bit in the block containing the pos'th bit
@@ -565,6 +645,7 @@ public:
 
         if (bit)
             data[w] = data[w] | EXP_MASK[b];
+        update_sums(w);
         sz++;
     }
     // Remove the pos'th bit in the stream without updating the
@@ -592,7 +673,9 @@ public:
         for (ui32 i = w + 1; i <= block_index(sz - 1); i++) {
             data[i - 1] = data[i - 1] | ((data[i] & 1ULL) << 63);
             data[i] = data[i] >> 1;
+            update_sums(i - 1);
         }
+        update_sums(block_index(sz - 1));
         sz--;
     }
 
@@ -653,13 +736,18 @@ public:
             if (end_b >= W)
                 end_b = W - 1;
 
-            for (ui32 i = end_b; i > w_shift; i--)
+            for (ui32 i = end_b; i > w_shift; i--) {
                 data[i] = (data[i - w_shift] << b_shift) | (data[i - w_shift - 1] >> (64 - b_shift));
+                update_sums(i);
+            }
 
             data[w_shift] = data[0] << b_shift;
+            update_sums(w_shift);
 
-            for (ui32 i = 0; i < w_shift; i++)
+            for (ui32 i = 0; i < w_shift; i++) {
                 data[i] = 0;
+                zero_sums(i);
+            }
         } else {
             ui32 end_b = w + w_shift;
             if (end_b >= W)
@@ -667,10 +755,14 @@ public:
 
             const ui32 len = end_b - w_shift;
 
-            for (ui32 i = 0; i <= len; i++)
+            for (ui32 i = 0; i <= len; i++) {
                 data[end_b - i] = data[end_b - i - w_shift];
-            for (ui32 i = 0; i < w_shift; i++)
+                set_sums(end_b - i, sums[end_b - i - w_shift]);
+            }
+            for (ui32 i = 0; i < w_shift; i++) {
                 data[i] = 0;
+                zero_sums(i, 0);
+            }
         }
 
         sz += s;
@@ -696,14 +788,19 @@ public:
         const ui32 b_shift = s - w_shift * 64;
 
         if (b_shift > 0) {
-            for (ui32 i = 0; i < w; i++)
+            for (ui32 i = 0; i < w; i++) {
                 data[i] = (data[i + w_shift] >> b_shift) | (data[i + w_shift + 1] << (64 - b_shift));
+                update_sums(i);
+            }
 
             data[w] = data[w + w_shift] >> b_shift;
+            update_sums(w);
 
         } else {
-            for (ui32 i = 0; i <= w; i++)
+            for (ui32 i = 0; i <= w; i++) {
                 data[i] = data[i + w_shift];
+                update_sums(i);
+            }
         }
 
         sz -= s;
@@ -723,14 +820,19 @@ public:
         const ui32 b_shift = s - w_shift * 64;
 
         if (b_shift > 0) {
-            for (ui32 i = 0; i < w; i++)
+            for (ui32 i = 0; i < w; i++) {
                 data[i] = (data[i + w_shift] >> b_shift) | (data[i + w_shift + 1] << (64 - b_shift));
+                update_sums(i);
+            }
 
             data[w] = data[w + w_shift] >> b_shift;
+            update_sums(w);
 
         } else {
-            for (ui32 i = 0; i <= w; i++)
+            for (ui32 i = 0; i <= w; i++) {
                 data[i] = data[i + w_shift];
+                update_sums(i);
+            }
         }
 
         sz -= s;

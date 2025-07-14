@@ -16,7 +16,7 @@ class ContiguousAllocator {
 public:
 
     std::vector<T> data;
-    std::unordered_set<ui32> free_list;
+    std::vector<ui32> free_list;
 
 public:
     ContiguousAllocator() : data(), free_list() {};
@@ -31,14 +31,14 @@ public:
 
     void reserve(ui32 sz) {
         data.reserve(sz);
+        free_list.reserve(sz);
     }
 
     ui32 alloc() {
         ui32 idx;
         if (!free_list.empty()) {
-            auto it = free_list.begin();
-            idx = *it;// free_list.back();
-            free_list.erase(it);
+            idx = free_list.back();
+            free_list.pop_back();
         } else {
             idx = (ui32)data.size();
             data.resize(idx + 1);
@@ -47,10 +47,7 @@ public:
     }
 
     void dealloc(ui32 idx) {
-        if (free_list.find(idx) != free_list.end()) {
-            int wahotiahw = 0;
-        }
-        free_list.insert(idx);
+        free_list.push_back(idx);
     }
 
     void clear() {
